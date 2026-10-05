@@ -29,6 +29,7 @@ jobs:
           mkdir -p site
           cp index.html manifest.webmanifest icon-180.png icon-192.png icon-512.png site/
       - name: Fetch Trading 212 positions (encrypted)
+        continue-on-error: true
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY || secrets.T212KEY }}
           T212_API_SECRET: ${{ secrets.T212_API_SECRET || secrets.T212SECRET }}
