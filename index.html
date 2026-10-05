@@ -233,6 +233,16 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:64
       </div>
     </div>
     <div class="card">
+      <div class="card-h"><h2>Trading 212 sync</h2><span class="tag" id="t212Tag"></span></div>
+      <div class="field">
+        <label for="pass">Passphrase</label>
+        <div class="inline"><input id="pass" type="password" autocomplete="off" placeholder="same as APP_PASSPHRASE on GitHub"><button class="btn sm" id="savePassBtn">Save</button></div>
+        <div class="hint">Twice a day GitHub fetches your positions from Trading 212 and publishes them encrypted. The passphrase decrypts them here and stays on this phone.</div>
+      </div>
+      <div class="actions"><button class="btn ghost sm" id="syncNowBtn">Sync now</button></div>
+      <div class="note" id="t212Note"></div>
+    </div>
+    <div class="card">
       <div class="card-h"><h2>S&amp;P 500 ETF (VUAA)</h2></div>
       <div class="field"><label for="etfEur">Current value in € (from Trading 212)</label><div class="inline"><input id="etfEur" type="number" inputmode="decimal" step="0.01"><button class="btn sm" id="saveEtfBtn">Save</button></div><div class="hint">VUAA trades in Milan and the free feed can't price it, so enter the value from the app now and then. Its day move is estimated from the S&amp;P 500 and the euro.</div></div>
     </div>
@@ -293,7 +303,9 @@ const DEFAULTS = {
   ],
   plan: { etfMonthly: 0, weekly: [] },
   alerts: [],
-  dismissed: []
+  dismissed: [],
+  passphrase: "",
+  t212: null
 };
 // Catalysts known from research in early October 2026; the Finnhub earnings calendar replaces these when it answers.
 const KNOWN_EVENTS = [
@@ -389,6 +401,39 @@ function notify(a){ const msg = `${a.sym} ${condText(a)} · now ${fmtUsd(a.fired
 function condText(a){ return a.cond==="below" ? `fell below ${fmtUsd(a.val)}` : a.cond==="above" ? `rose above ${fmtUsd(a.val)}` : a.cond==="dayDown" ? `dropped ${Math.abs(a.val)}% today` : `jumped ${Math.abs(a.val)}% today`; }
 function condPending(a){ return a.cond==="below" ? `below ${fmtUsd(a.val)}` : a.cond==="above" ? `above ${fmtUsd(a.val)}` : a.cond==="dayDown" ? `−${Math.abs(a.val)}% in a day` : `+${Math.abs(a.val)}% in a day`; }
 
+/* ---------- Trading 212 sync (encrypted positions published by GitHub Actions) ---------- */
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function decryptPositions(blob, pass){
+  const salt = b64(blob.salt), iv = b64(blob.iv), ct = b64(blob.ct);
+  const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({ name:"PBKDF2", salt, iterations: blob.iter || 310000, hash:"SHA-256" }, km, { name:"AES-GCM", length:256 }, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({ name:"AES-GCM", iv }, key, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function syncT212(manual){
+  if(!S.passphrase){ if(manual) toast("Enter the passphrase first"); return; }
+  if(!window.isSecureContext || !crypto.subtle){ if(manual) toast("Decryption needs a secure (https) page"); return; }
+  let blob;
+  try{ const r = await fetch("data/positions.enc?t=" + Date.now(), { cache:"no-store" }); if(!r.ok) throw new Error(r.status); blob = await r.json(); }
+  catch(e){ if(manual) toast("No synced file yet (GitHub hasn't run, or secrets missing)"); return; }
+  let data;
+  try{ data = await decryptPositions(blob, S.passphrase); }
+  catch(e){ if(manual) toast("Passphrase doesn't match the file"); S.t212 = Object.assign(S.t212||{}, { error:"passphrase" }); render(); return; }
+  applyPositions(data); save(); if(manual) toast("Synced " + data.positions.length + " positions"); render(); refreshQuotes();
+}
+function applyPositions(data){
+  const seen = new Set();
+  (data.positions||[]).forEach(p=>{
+    if(!p.sym || !(p.qty > 0)) return; seen.add(p.sym);
+    if(p.sym === S.etf.sym){ const v = p.valueCurrency === "EUR" || p.currency === "EUR" || !p.currency ? p.value : null; if(v) { S.etf.eur = Math.round(v*100)/100; S.etf.asOf = data.at; } S.etf.qty = p.qty; return; }
+    let h = S.holdings.find(x=>x.sym===p.sym);
+    if(!h){ h = { sym:p.sym, name:(p.name||p.sym).replace(/\s+/g," ").trim(), qty:0, refEur:0 }; S.holdings.push(h); }
+    h.qty = p.qty; h.t212 = { avg:p.avgPrice, ppl:p.ppl, value:p.value, cur:p.currency };
+  });
+  S.holdings.forEach(h=>{ if(!seen.has(h.sym) && h.t212){ h.qty = 0; delete h.t212; } }); // sold out since last sync
+  S.t212 = { at: data.at, count: (data.positions||[]).length, error: null };
+}
+
 /* ---------- Render ---------- */
 function render(){
   const t = totals();
@@ -431,6 +476,9 @@ function render(){
   const sel = $("aSym"); const cur = sel.value; sel.innerHTML = allSyms().map(s=>`<option value="${esc(s)}">${esc(s)} · ${esc(nameOf(s))}</option>`).join(""); if(cur) sel.value = cur;
   // settings
   $("keyTag").textContent = S.finnhubKey ? "key saved" : "no key"; $("keyTag").className = "tag " + (S.finnhubKey?"up":"warn");
+  const tt = $("t212Tag"); if(S.t212 && S.t212.at && !S.t212.error){ tt.textContent = "synced " + new Date(S.t212.at).toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}); tt.className = "tag up"; } else if(S.t212 && S.t212.error){ tt.textContent = "passphrase?"; tt.className = "tag warn"; } else { tt.textContent = S.passphrase ? "not synced yet" : "off"; tt.className = "tag"; }
+  $("t212Note").textContent = S.t212 && S.t212.at && !S.t212.error ? `${S.t212.count} positions from Trading 212. Share counts and the VUAA value update automatically; the live feed prices them.` : "Add the three secrets on GitHub (T212_API_KEY, T212_API_SECRET, APP_PASSPHRASE), then enter the same passphrase here.";
+  if(S.t212 && S.t212.at && !S.t212.error) $("fxTag").textContent += " · T212 " + new Date(S.t212.at).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"});
   if(document.activeElement !== $("fx")) $("fx").value = S.eurusd; if(document.activeElement !== $("etfEur")) $("etfEur").value = S.etf.eur;
   const he = $("holdEdit"); he.innerHTML = ""; S.holdings.forEach((h,i)=>{ const d = document.createElement("div"); d.className="row"; d.innerHTML = `<div><div class="sym">${esc(h.sym)}</div><div class="name">${esc(h.name)}</div></div><div class="inline"><input type="number" inputmode="decimal" step="any" style="width:110px" data-qty="${i}" value="${h.qty||""}" placeholder="shares" aria-label="${esc(h.sym)} shares"><button class="btn ghost sm" data-rm="${i}">✕</button></div>`; he.appendChild(d); });
   he.querySelectorAll("[data-qty]").forEach(inp=> inp.onchange = ()=>{ S.holdings[+inp.dataset.qty].qty = parseFloat(inp.value)||0; save(); render(); });
@@ -491,6 +539,8 @@ async function openSheet(sym, name){
 function showView(v){ view = v; ["portfolio","watch","alerts","cal","settings"].forEach(k=>{ $("v-"+k).hidden = k!==v; }); document.querySelectorAll(".tabs button").forEach(b=> b.setAttribute("aria-selected", b.dataset.v===v)); try{ localStorage.setItem(LS+".view", v); }catch(e){} if(v==="cal") loadCal(false); window.scrollTo(0,0); }
 document.querySelectorAll(".tabs button").forEach(b=> b.onclick = ()=> showView(b.dataset.v));
 $("saveKeyBtn").onclick = async ()=>{ S.finnhubKey = $("fkey").value.trim(); save(); $("fkey").value = ""; toast(S.finnhubKey ? "Key saved, loading prices" : "Key cleared"); await refreshQuotes(); schedule(); };
+$("savePassBtn").onclick = async ()=>{ S.passphrase = $("pass").value; save(); $("pass").value = ""; if(S.passphrase){ toast("Passphrase saved, syncing"); await syncT212(true); } else { toast("Passphrase cleared"); render(); } };
+$("syncNowBtn").onclick = ()=> syncT212(true);
 $("fx").onchange = ()=>{ S.eurusd = parseFloat($("fx").value)||1.17; save(); render(); };
 $("saveEtfBtn").onclick = ()=>{ S.etf.eur = parseFloat($("etfEur").value)||0; S.etf.asOf = new Date().toISOString().slice(0,10); save(); render(); toast("ETF value saved"); };
 $("addHoldBtn").onclick = ()=> promptSymbol("Add holding", (sym,name)=>{ if(!S.holdings.find(h=>h.sym===sym)) S.holdings.push({sym,name,qty:0,refEur:0}); save(); render(); refreshQuotes(); });
@@ -500,19 +550,19 @@ $("savePlanBtn").onclick = ()=>{ S.plan.etfMonthly = parseFloat($("planEtf").val
 $("addAlertBtn").onclick = ()=>{ const sym = $("aSym").value, cond = $("aCond").value, val = parseFloat($("aVal").value); if(!sym || isNaN(val)){ toast("Enter a value"); return; } S.alerts.push({ id: Math.random().toString(36).slice(2,9), sym, cond, val, note: $("aNote").value.trim(), firedAt: null }); save(); $("aVal").value=""; $("aNote").value=""; checkAlerts(); render(); toast("Alert added"); try{ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }catch(e){} };
 $("shareAlertsBtn").onclick = ()=>{ const act = S.alerts.filter(a=>!a.firedAt); if(!act.length){ toast("No active alerts"); return; } const txt = "Please watch these price alerts for me:\n" + act.map(a=>`- ${a.sym} ${condPending(a)}${a.note?" ("+a.note+")":""}`).join("\n"); if(navigator.share){ navigator.share({text:txt}).catch(()=>copyText(txt)); } else copyText(txt); };
 $("refreshCalBtn").onclick = ()=> loadCal(true);
-$("exportBtn").onclick = ()=> copyText(JSON.stringify(Object.assign({}, S, {finnhubKey: undefined})));
-$("importBtn").onclick = ()=> promptText("Paste backup JSON", txt=>{ try{ const o = JSON.parse(txt); S = Object.assign(clone(DEFAULTS), o, {finnhubKey: S.finnhubKey}); save(); render(); refreshQuotes(); toast("Restored"); }catch(e){ toast("Not valid backup text"); } });
-$("resetBtn").onclick = ()=> promptConfirm("Reset holdings, watchlist, plan and alerts to the defaults? Your API key is kept.", ()=>{ const k = S.finnhubKey; S = clone(DEFAULTS); S.finnhubKey = k; save(); render(); refreshQuotes(); });
+$("exportBtn").onclick = ()=> copyText(JSON.stringify(Object.assign({}, S, {finnhubKey: undefined, passphrase: undefined})));
+$("importBtn").onclick = ()=> promptText("Paste backup JSON", txt=>{ try{ const o = JSON.parse(txt); S = Object.assign(clone(DEFAULTS), o, {finnhubKey: S.finnhubKey, passphrase: S.passphrase}); save(); render(); refreshQuotes(); toast("Restored"); }catch(e){ toast("Not valid backup text"); } });
+$("resetBtn").onclick = ()=> promptConfirm("Reset holdings, watchlist, plan and alerts to the defaults? Your API key and passphrase are kept.", ()=>{ const k = S.finnhubKey, pp = S.passphrase; S = clone(DEFAULTS); S.finnhubKey = k; S.passphrase = pp; save(); render(); refreshQuotes(); });
 
 function promptSymbol(title, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(title)}</h3><div class="field" style="padding:0"><label for="pSym">Ticker (US listing)</label><input id="pSym" autocapitalize="characters" placeholder="e.g. AMZN"></div><div class="field" style="padding:0"><label for="pName">Name</label><input id="pName" placeholder="e.g. Amazon"></div><div class="actions" style="padding:0"><button class="btn sm" id="pOk">Add</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ const sym = $("pSym").value.trim().toUpperCase(); if(!sym) return; cb(sym, $("pName").value.trim()||sym); close(); }; $("pSym").focus(); }
 function promptText(title, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(title)}</h3><div class="field" style="padding:0"><input id="pTxt" placeholder="paste here"></div><div class="actions" style="padding:0"><button class="btn sm" id="pOk">Restore</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ cb($("pTxt").value); close(); }; }
 function promptConfirm(msg, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>Are you sure?</h3><p style="margin:0">${esc(msg)}</p><div class="actions" style="padding:0"><button class="btn danger sm" id="pOk">Yes, reset</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ cb(); close(); }; }
 
-document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible"){ refreshQuotes(); schedule(); } else clearTimeout(timer); });
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible"){ refreshQuotes(); schedule(); if(S.passphrase && (!S.t212 || !S.t212.at || Date.now() - Date.parse(S.t212.at) > 3600000)) syncT212(false); } else clearTimeout(timer); });
 window.addEventListener("online", ()=>{ refreshQuotes(); schedule(); });
 
 /* ---------- Boot ---------- */
-(function(){ let v = "portfolio"; try{ v = localStorage.getItem(LS+".view") || "portfolio"; }catch(e){} showView(["portfolio","watch","alerts","cal","settings"].includes(v)?v:"portfolio"); render(); refreshQuotes().then(schedule); })();
+(function(){ let v = "portfolio"; try{ v = localStorage.getItem(LS+".view") || "portfolio"; }catch(e){} showView(["portfolio","watch","alerts","cal","settings"].includes(v)?v:"portfolio"); render(); refreshQuotes().then(schedule); if(S.passphrase) syncT212(false); })();
 </script>
 </body>
 </html>

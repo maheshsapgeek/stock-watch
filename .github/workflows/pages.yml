@@ -2,6 +2,9 @@ name: Publish to GitHub Pages
 on:
   push:
     branches: [main]
+  schedule:
+    # 08:00 and 23:00 Amsterdam (06:00 and 21:00 UTC) on weekdays: refresh positions from Trading 212
+    - cron: "0 6,21 * * 1-5"
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,11 +21,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - uses: actions/setup-python@v5
         with:
-          enablement: true
+          python-version: "3.12"
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp index.html manifest.webmanifest icon-180.png icon-192.png icon-512.png site/
+      - name: Fetch Trading 212 positions (encrypted)
+        env:
+          T212_API_KEY: ${{ secrets.T212_API_KEY }}
+          T212_API_SECRET: ${{ secrets.T212_API_SECRET }}
+          APP_PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
+        run: |
+          pip install -q cryptography
+          python sync/fetch_positions.py
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v4
