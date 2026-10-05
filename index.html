@@ -424,9 +424,12 @@ async function syncT212(manual){
   catch(e){ if(manual) toast("Passphrase doesn't match the file"); S.t212 = Object.assign(S.t212||{}, { error:"passphrase" }); save(); render(); return; }
   applyPositions(data); save(); if(manual) toast("Synced " + data.positions.length + " positions"); render(); refreshQuotes();
 }
+const SYM_ALIAS = { FB: "META" };
 function applyPositions(data){
   const seen = new Set();
+  Object.entries(SYM_ALIAS).forEach(([a,b])=>{ const i = S.holdings.findIndex(h=>h.sym===a); if(i>=0){ const dup = S.holdings[i]; const real = S.holdings.find(h=>h.sym===b); if(real){ real.qty = dup.qty; real.t212 = dup.t212; S.holdings.splice(i,1); } else dup.sym = b; } });
   (data.positions||[]).forEach(p=>{
+    p.sym = SYM_ALIAS[p.sym] || p.sym;
     if(!p.sym || !(p.qty > 0)) return; seen.add(p.sym);
     if(p.sym === S.etf.sym){ const v = p.valueCurrency === "EUR" || p.currency === "EUR" || !p.currency ? p.value : null; if(v) { S.etf.eur = Math.round(v*100)/100; S.etf.asOf = data.at; } S.etf.qty = p.qty; return; }
     let h = S.holdings.find(x=>x.sym===p.sym);

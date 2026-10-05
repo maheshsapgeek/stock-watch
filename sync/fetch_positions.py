@@ -64,12 +64,16 @@ def fetch(path):
     raise last
 
 
+# Trading 212 keeps some legacy tickers; map them to the symbols the app and Finnhub use.
+TICKER_ALIAS = {"FB": "META"}
+
+
 def sym_from(ticker, isin):
     if isin and isin in KNOWN_ISIN:
         return KNOWN_ISIN[isin]
     base = (ticker or "").split("_")[0]
     base = re.sub(r"[a-z]+$", "", base)  # T212 marks non-US listings with a lowercase suffix letter
-    return base or ticker
+    return TICKER_ALIAS.get(base, base) or ticker
 
 
 def normalize(p):
