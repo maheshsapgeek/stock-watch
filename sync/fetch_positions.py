@@ -110,9 +110,17 @@ def encrypt(obj):
     return {"v": 1, "kdf": "PBKDF2-SHA256", "iter": ITER, "salt": b(salt), "iv": b(iv), "ct": b(ct)}
 
 
+def write_status(**kw):
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(os.path.join(os.path.dirname(OUT), "status.json"), "w") as f:
+        json.dump({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **kw}, f)
+
+
 def main():
-    if not KEY or not PASS:
-        print("T212_API_KEY or APP_PASSPHRASE missing; skipping sync.")
+    missing = [n for n, v in (("T212_API_KEY", KEY), ("APP_PASSPHRASE", PASS)) if not v]
+    if missing:
+        print(f"{', '.join(missing)} missing; skipping sync.")
+        write_status(ok=False, reason="secrets_missing", missing=missing)
         return 0
     positions = fetch("/equity/positions")
     if isinstance(positions, dict):
@@ -132,6 +140,7 @@ def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as f:
         json.dump(encrypt(payload), f)
+    write_status(ok=True, count=len(payload["positions"]), synced_at=payload["at"])
     print(f"Wrote {OUT}: {len(payload['positions'])} positions at {payload['at']}")
     return 0
 
@@ -141,4 +150,9 @@ if __name__ == "__main__":
         sys.exit(main())
     except urllib.error.HTTPError as e:
         print(f"Trading 212 API error {e.code}: {e.reason}")
+        write_status(ok=False, reason="t212_http_error", code=e.code)
+        sys.exit(1)
+    except Exception as e:  # noqa: BLE001
+        print(f"Sync failed: {type(e).__name__}: {e}")
+        write_status(ok=False, reason="error", detail=type(e).__name__)
         sys.exit(1)

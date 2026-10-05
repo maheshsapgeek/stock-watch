@@ -338,6 +338,7 @@ const fmtEur = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("nl-NL
 const fmtUsd = n => n == null || isNaN(n) ? "—" : "$" + n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct = n => n == null || isNaN(n) ? "" : (n>0?"+":"") + n.toFixed(2) + "%";
 const sign = n => n > 0.0001 ? "up" : n < -0.0001 ? "down" : "flat";
+const fmtQty = q => q >= 100 ? q.toFixed(1) : q >= 1 ? q.toFixed(3) : q.toFixed(4);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function nyNow(){ const d = new Date(); const p = new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour12:false,weekday:"short",hour:"2-digit",minute:"2-digit"}).formatToParts(d); const o={}; p.forEach(x=>o[x.type]=x.value); return { wd:o.weekday, mins: (+o.hour%24)*60 + (+o.minute) }; }
 function session(){ const {wd,mins} = nyNow(); if(wd==="Sat"||wd==="Sun") return "closed"; if(mins>=570 && mins<960) return "open"; if(mins>=240 && mins<570) return "pre"; if(mins>=960 && mins<1200) return "post"; return "closed"; }
@@ -413,12 +414,14 @@ async function decryptPositions(blob, pass){
 async function syncT212(manual){
   if(!S.passphrase){ if(manual) toast("Enter the passphrase first"); return; }
   if(!window.isSecureContext || !crypto.subtle){ if(manual) toast("Decryption needs a secure (https) page"); return; }
+  let status = null; try{ const sr = await fetch("data/status.json?t=" + Date.now(), { cache:"no-store" }); if(sr.ok) status = await sr.json(); }catch(e){}
+  if(status && status.ok === false){ S.t212 = Object.assign(S.t212||{}, { error: status.reason, status }); save(); render(); if(manual) toast(status.reason==="secrets_missing" ? "GitHub secrets missing: " + (status.missing||[]).join(", ") : status.reason==="t212_http_error" ? "Trading 212 rejected the key (HTTP " + status.code + ")" : "Sync job failed on GitHub"); return; }
   let blob;
   try{ const r = await fetch("data/positions.enc?t=" + Date.now(), { cache:"no-store" }); if(!r.ok) throw new Error(r.status); blob = await r.json(); }
-  catch(e){ if(manual) toast("No synced file yet (GitHub hasn't run, or secrets missing)"); return; }
+  catch(e){ S.t212 = Object.assign(S.t212||{}, { error:"nofile" }); save(); render(); if(manual) toast("No synced file published yet (" + e.message + ")"); return; }
   let data;
   try{ data = await decryptPositions(blob, S.passphrase); }
-  catch(e){ if(manual) toast("Passphrase doesn't match the file"); S.t212 = Object.assign(S.t212||{}, { error:"passphrase" }); render(); return; }
+  catch(e){ if(manual) toast("Passphrase doesn't match the file"); S.t212 = Object.assign(S.t212||{}, { error:"passphrase" }); save(); render(); return; }
   applyPositions(data); save(); if(manual) toast("Synced " + data.positions.length + " positions"); render(); refreshQuotes();
 }
 function applyPositions(data){
@@ -451,9 +454,9 @@ function render(){
   const rows = [{ etf:true }].concat(S.holdings);
   rows.forEach(h=>{
     const b = document.createElement("button"); b.className = "row";
-    if(h.etf){ const e = etfValue(); b.innerHTML = `<div><div class="sym">${esc(S.etf.sym)}</div><div class="name">${esc(S.etf.name)}</div></div><div><div class="px num">${fmtEur(e.eur)}</div><div class="sub"><span class="pill ${sign(e.dp)}">${e.est ? fmtPct(e.dp) : "—"}</span> <span class="muted">${e.est?"est. via S&P":""}</span></div></div>`; b.onclick = ()=>openSheet(S.etf.proxy, S.etf.name + " (via SPY)"); hr.appendChild(b); return; }
+    if(h.etf){ const e = etfValue(); b.innerHTML = `<div><div class="sym">${esc(S.etf.sym)}${S.etf.qty>0?` <span class="muted num">${fmtQty(S.etf.qty)} sh</span>`:""}</div><div class="name">${esc(S.etf.name)}</div></div><div><div class="px num">${fmtEur(e.eur)}</div><div class="sub"><span class="pill ${sign(e.dp)}">${e.est ? fmtPct(e.dp) : "—"}</span> <span class="muted">${e.est?"est. via S&P":""}</span></div></div>`; b.onclick = ()=>openSheet(S.etf.proxy, S.etf.name + " (via SPY)"); hr.appendChild(b); return; }
     const q = Q[h.sym]; const v = holdingValue(h);
-    b.innerHTML = `<div><div class="sym">${esc(h.sym)}</div><div class="name">${esc(h.name)}${v.live?"":(h.qty>0?"":" · tap Settings to add shares")}</div></div><div><div class="px num">${q ? fmtUsd(q.c) : "—"}</div><div class="sub">${q?`<span class="pill ${sign(q.dp)}">${fmtPct(q.dp)}</span>`:""} <span class="num">${v.eur>0 ? fmtEur(v.eur) : ""}</span>${v.live?"":(v.eur>0&&S.refDate?` <span class="muted">${esc(S.refDate.slice(5))}</span>`:"")}</div></div>`;
+    b.innerHTML = `<div><div class="sym">${esc(h.sym)}${h.qty>0?` <span class="muted num">${fmtQty(h.qty)} sh</span>`:""}</div><div class="name">${esc(h.name)}${v.live?"":(h.qty>0?"":" · no shares yet")}</div></div><div><div class="px num">${q ? fmtUsd(q.c) : "—"}</div><div class="sub">${q?`<span class="pill ${sign(q.dp)}">${fmtPct(q.dp)}</span>`:""} <span class="num">${v.eur>0 ? fmtEur(v.eur) : ""}</span>${v.live?"":(v.eur>0&&S.refDate?` <span class="muted">${esc(S.refDate.slice(5))}</span>`:"")}</div></div>`;
     b.onclick = ()=>openSheet(h.sym, h.name); hr.appendChild(b);
   });
   // plan
@@ -476,8 +479,8 @@ function render(){
   const sel = $("aSym"); const cur = sel.value; sel.innerHTML = allSyms().map(s=>`<option value="${esc(s)}">${esc(s)} · ${esc(nameOf(s))}</option>`).join(""); if(cur) sel.value = cur;
   // settings
   $("keyTag").textContent = S.finnhubKey ? "key saved" : "no key"; $("keyTag").className = "tag " + (S.finnhubKey?"up":"warn");
-  const tt = $("t212Tag"); if(S.t212 && S.t212.at && !S.t212.error){ tt.textContent = "synced " + new Date(S.t212.at).toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}); tt.className = "tag up"; } else if(S.t212 && S.t212.error){ tt.textContent = "passphrase?"; tt.className = "tag warn"; } else { tt.textContent = S.passphrase ? "not synced yet" : "off"; tt.className = "tag"; }
-  $("t212Note").textContent = S.t212 && S.t212.at && !S.t212.error ? `${S.t212.count} positions from Trading 212. Share counts and the VUAA value update automatically; the live feed prices them.` : "Add the three secrets on GitHub (T212_API_KEY, T212_API_SECRET, APP_PASSPHRASE), then enter the same passphrase here.";
+  const tt = $("t212Tag"); if(S.t212 && S.t212.at && !S.t212.error){ tt.textContent = "synced " + new Date(S.t212.at).toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}); tt.className = "tag up"; } else if(S.t212 && S.t212.error){ tt.textContent = S.t212.error==="passphrase" ? "passphrase?" : S.t212.error==="secrets_missing" ? "secrets missing" : S.t212.error==="t212_http_error" ? "T212 key rejected" : S.t212.error==="nofile" ? "no file yet" : "sync failed"; tt.className = "tag warn"; } else { tt.textContent = S.passphrase ? "not synced yet" : "off"; tt.className = "tag"; }
+  $("t212Note").textContent = S.t212 && S.t212.at && !S.t212.error ? `${S.t212.count} positions from Trading 212. Share counts and the VUAA value update automatically; the live feed prices them.` : S.t212 && S.t212.error==="secrets_missing" ? `GitHub ran but couldn't find: ${(S.t212.status&&S.t212.status.missing||[]).join(", ")}. Check the secret names on GitHub.` : S.t212 && S.t212.error==="t212_http_error" ? "Trading 212 rejected the API key or secret. Check both values on GitHub." : S.t212 && S.t212.error==="passphrase" ? "The passphrase here doesn't match APP_PASSPHRASE on GitHub." : "Add the three secrets on GitHub (T212_API_KEY, T212_API_SECRET, APP_PASSPHRASE), then enter the same passphrase here.";
   if(S.t212 && S.t212.at && !S.t212.error) $("fxTag").textContent += " · T212 " + new Date(S.t212.at).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"});
   if(document.activeElement !== $("fx")) $("fx").value = S.eurusd; if(document.activeElement !== $("etfEur")) $("etfEur").value = S.etf.eur;
   const he = $("holdEdit"); he.innerHTML = ""; S.holdings.forEach((h,i)=>{ const d = document.createElement("div"); d.className="row"; d.innerHTML = `<div><div class="sym">${esc(h.sym)}</div><div class="name">${esc(h.name)}</div></div><div class="inline"><input type="number" inputmode="decimal" step="any" style="width:110px" data-qty="${i}" value="${h.qty||""}" placeholder="shares" aria-label="${esc(h.sym)} shares"><button class="btn ghost sm" data-rm="${i}">✕</button></div>`; he.appendChild(d); });
@@ -525,6 +528,7 @@ async function openSheet(sym, name){
   const host = $("sheetHost"); const q = Q[sym];
   host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(sym)} <span class="muted">${esc(name)}</span></h3>
     <div class="kv"><dt>Price</dt><dd class="num">${q?fmtUsd(q.c):"—"} ${q?`<span class="pill ${sign(q.dp)}">${fmtPct(q.dp)}</span>`:""}</dd><dt>Previous close</dt><dd class="num">${q?fmtUsd(q.pc):"—"}</dd><dt>Day range</dt><dd class="num">${q?fmtUsd(q.l)+" – "+fmtUsd(q.h):"—"}</dd><dt>Updated</dt><dd class="num">${q&&q.t?new Date(q.t*1000).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}):"—"} NL</dd></div>
+    ${(()=>{ const h = S.holdings.find(x=>x.sym===sym); if(!(h && h.qty>0)) return ""; const t = h.t212||{}; return `<div class="kv"><dt>You hold</dt><dd class="num">${fmtQty(h.qty)} shares</dd>${t.avg?`<dt>Average paid</dt><dd class="num">${fmtUsd(t.avg)}</dd>`:""}${t.ppl!=null?`<dt>Profit / loss (T212)</dt><dd class="num ${sign(t.ppl)}">${t.ppl>=0?"+":"−"}${fmtEur(Math.abs(t.ppl))}</dd>`:""}</div>`; })()}
     <div id="metric"><span class="muted">Loading 52-week range…</span></div>
     <div class="actions" style="padding:0"><button class="btn sm" id="shAlert">Set alert</button><a class="btn ghost sm" href="https://finance.yahoo.com/quote/${encodeURIComponent(sym)}" target="_blank" rel="noopener">Yahoo Finance</a><button class="btn ghost sm" id="shClose">Close</button></div>
     <div class="label">Recent news</div><div class="news" id="news"><span class="muted">Loading…</span></div></div></div>`;
