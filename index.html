@@ -136,6 +136,8 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:64
 .news a{color:var(--fg);text-decoration:none;display:block;border-top:1px solid var(--line);padding-top:10px}
 .news a:first-child{border-top:0;padding-top:0}
 .news .src{font-size:12px;color:var(--fg-3)}
+.news.pad{padding:10px 14px 14px}
+.news .chip{display:inline-block;font:500 11px/1 var(--font-cond);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-right:6px}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;z-index:30;box-shadow:var(--shadow)}
 .range{height:6px;border-radius:3px;background:var(--panel-2);position:relative;margin:8px 0 2px}
 .range i{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--accent);transform:translateX(-50%)}
@@ -187,6 +189,13 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:64
       <div class="card-h"><h2>Watchlist</h2><button class="btn ghost sm" id="addWatchBtn">+ Add</button></div>
       <div class="rows" id="watchRows"></div>
     </div>
+  </section>
+
+  <!-- News -->
+  <section class="view" id="v-news" hidden>
+    <div class="card"><div class="card-h"><h2>Your stocks</h2><button class="btn ghost sm" id="refreshNewsBtn">Refresh</button></div><div class="news pad" id="newsStocks"></div></div>
+    <div class="card"><div class="card-h"><h2>Washington &amp; markets</h2><span class="tag" id="newsTag"></span></div><div class="news pad" id="newsWash"></div></div>
+    <div class="card"><div class="card-h"><h2>Voices</h2><span class="tag">Musk · Buffett · Kiyosaki</span></div><div class="news pad" id="newsVoices"></div><div class="note">What they said, as reported by news outlets. Not advice, and X posts arrive second-hand.</div></div>
   </section>
 
   <!-- Alerts -->
@@ -272,6 +281,7 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:64
 <nav class="tabs" role="tablist">
   <button role="tab" data-v="portfolio" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 17V9M10 17V5M15 17v-7M20 17V8"/></svg>Portfolio</button>
   <button role="tab" data-v="watch"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Watch</button>
+  <button role="tab" data-v="news"><svg viewBox="0 0 24 24"><path d="M4 5h13v14H4zM17 8h3v9a2 2 0 0 1-2 2M7 9h7M7 12h7M7 15h5"/></svg>News</button>
   <button role="tab" data-v="alerts"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0"/></svg>Alerts<span class="n" id="alertN" hidden></span></button>
   <button role="tab" data-v="cal"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Dates</button>
   <button role="tab" data-v="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
@@ -542,8 +552,38 @@ async function openSheet(sym, name){
   try{ const to = new Date().toISOString().slice(0,10), from = new Date(Date.now()-7*864e5).toISOString().slice(0,10); const n = await fh("company-news",{symbol:sym,from,to}); const items = (n||[]).slice(0,6); $("news").innerHTML = items.length ? items.map(i=>`<a href="${esc(i.url)}" target="_blank" rel="noopener"><div>${esc(i.headline)}</div><div class="src">${esc(i.source)} · ${new Date(i.datetime*1000).toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</div></a>`).join("") : `<span class="muted">No news in the last week.</span>`; }catch(e){ $("news").innerHTML = `<span class="muted">News unavailable${e.message==="ratelimit"?" (rate limit)":""}.</span>`; }
 }
 
+/* ---------- News ---------- */
+let NEWS = { general: [], company: {}, genAt: 0, compAt: 0 };
+const RX_WASH = /\b(trump|white house|tariff|federal reserve|\bfed\b|powell|treasury yield|executive order|congress|senate|trade deal|sanction|antitrust|ftc|sec\b|export control|iran|opec|oil price|rate cut|rate hike|inflation|jobs report|cpi\b|gdp\b)/i;
+const RX_VOICE = /\b(musk|buffett|berkshire|kiyosaki|greg abel)\b/i;
+const NAME_RX = { NVDA:/nvidia/i, META:/\bmeta\b|facebook|zuckerberg/i, SPCX:/spacex|starlink|xai\b/i, WMT:/walmart/i, LLY:/\blilly\b|mounjaro|zepbound|retatrutide/i, MA:/mastercard/i, VUAA:/s&p 500|wall street|stock market/i, AMZN:/amazon|aws\b|jassy/i, JNJ:/johnson & johnson|\bj&j\b/i, PEP:/pepsico|pepsi/i, KO:/coca-cola|coke\b/i, IONQ:/ionq|quantum computing/i, CRWD:/crowdstrike/i, FCX:/freeport|copper/i, CEVA:/\bceva\b/i, TSLA:/tesla/i, AAPL:/apple\b/i, MSFT:/microsoft/i, GOOGL:/google|alphabet/i };
+async function loadNews(force){
+  if(!S.finnhubKey){ renderNews(); return; }
+  const now = Date.now();
+  if(force || now - NEWS.genAt > 10*60000){ try{ const g = await fh("news",{category:"general"}); NEWS.general = (g||[]).slice(0,80); NEWS.genAt = now; }catch(e){} }
+  if(force || now - NEWS.compAt > 60*60000){ const to = new Date().toISOString().slice(0,10), from = new Date(now-3*864e5).toISOString().slice(0,10);
+    for(const sym of allSyms()){ try{ const n = await fh("company-news",{symbol:sym,from,to}); NEWS.company[sym] = (n||[]).slice(0,4); }catch(e){ if(e.message==="ratelimit"||e.message==="backoff"||e.message==="badkey") break; } }
+    NEWS.compAt = now; }
+  renderNews();
+}
+function newsItem(i, chip){ return `<a href="${esc(i.url)}" target="_blank" rel="noopener">${chip?`<span class="chip">${esc(chip)}</span>`:""}<span>${esc(i.headline)}</span><div class="src">${esc(i.source||"")} · ${new Date(i.datetime*1000).toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</div></a>`; }
+function renderNews(){
+  const syms = allSyms(); const seen = new Set();
+  const stock = []; syms.forEach(sym=>{ (NEWS.company[sym]||[]).forEach(i=>{ if(!seen.has(i.url)){ seen.add(i.url); stock.push(Object.assign({chip:sym},i)); } }); });
+  NEWS.general.forEach(i=>{ if(seen.has(i.url)) return; const t = (i.headline||"") + " " + (i.summary||""); const hit = syms.find(sym=> NAME_RX[sym] && NAME_RX[sym].test(t) && sym!=="VUAA"); if(hit){ seen.add(i.url); stock.push(Object.assign({chip:hit},i)); } });
+  stock.sort((a,b)=>b.datetime-a.datetime);
+  const wash = NEWS.general.filter(i=> !seen.has(i.url) && RX_WASH.test((i.headline||"")+" "+(i.summary||""))).slice(0,15);
+  wash.forEach(i=>seen.add(i.url));
+  const voices = NEWS.general.concat(stock).filter(i=> RX_VOICE.test((i.headline||"")+" "+(i.summary||""))).filter((i,idx,arr)=> arr.findIndex(x=>x.url===i.url)===idx).slice(0,10);
+  const empty = msg => `<span class="muted">${msg}</span>`;
+  $("newsStocks").innerHTML = stock.length ? stock.slice(0,25).map(i=>newsItem(i,i.chip)).join("") : empty(S.finnhubKey ? "No stories yet. Tap Refresh." : "Add a Finnhub key in Settings to load news.");
+  $("newsWash").innerHTML = wash.length ? wash.map(i=>newsItem(i,null)).join("") : empty("Nothing market-moving from Washington in the latest wire.");
+  $("newsVoices").innerHTML = voices.length ? voices.map(i=>newsItem(i, RX_VOICE.exec((i.headline||"")+" "+(i.summary||""))[1].replace(/^greg abel$/i,"Berkshire"))).join("") : empty("No reported comments in the latest wire.");
+  $("newsTag").textContent = NEWS.genAt ? "wire " + new Date(NEWS.genAt).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}) : "";
+}
+
 /* ---------- Views & events ---------- */
-function showView(v){ view = v; ["portfolio","watch","alerts","cal","settings"].forEach(k=>{ $("v-"+k).hidden = k!==v; }); document.querySelectorAll(".tabs button").forEach(b=> b.setAttribute("aria-selected", b.dataset.v===v)); try{ localStorage.setItem(LS+".view", v); }catch(e){} if(v==="cal") loadCal(false); window.scrollTo(0,0); }
+function showView(v){ view = v; ["portfolio","watch","news","alerts","cal","settings"].forEach(k=>{ $("v-"+k).hidden = k!==v; }); document.querySelectorAll(".tabs button").forEach(b=> b.setAttribute("aria-selected", b.dataset.v===v)); try{ localStorage.setItem(LS+".view", v); }catch(e){} if(v==="cal") loadCal(false); if(v==="news") loadNews(false); window.scrollTo(0,0); }
 document.querySelectorAll(".tabs button").forEach(b=> b.onclick = ()=> showView(b.dataset.v));
 $("saveKeyBtn").onclick = async ()=>{ S.finnhubKey = $("fkey").value.trim(); save(); $("fkey").value = ""; toast(S.finnhubKey ? "Key saved, loading prices" : "Key cleared"); await refreshQuotes(); schedule(); };
 $("savePassBtn").onclick = async ()=>{ S.passphrase = $("pass").value; save(); $("pass").value = ""; if(S.passphrase){ toast("Passphrase saved, syncing"); await syncT212(true); } else { toast("Passphrase cleared"); render(); } };
@@ -557,6 +597,7 @@ $("savePlanBtn").onclick = ()=>{ S.plan.etfMonthly = parseFloat($("planEtf").val
 $("addAlertBtn").onclick = ()=>{ const sym = $("aSym").value, cond = $("aCond").value, val = parseFloat($("aVal").value); if(!sym || isNaN(val)){ toast("Enter a value"); return; } S.alerts.push({ id: Math.random().toString(36).slice(2,9), sym, cond, val, note: $("aNote").value.trim(), firedAt: null }); save(); $("aVal").value=""; $("aNote").value=""; checkAlerts(); render(); toast("Alert added"); try{ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }catch(e){} };
 $("shareAlertsBtn").onclick = ()=>{ const act = S.alerts.filter(a=>!a.firedAt); if(!act.length){ toast("No active alerts"); return; } const txt = "Please watch these price alerts for me:\n" + act.map(a=>`- ${a.sym} ${condPending(a)}${a.note?" ("+a.note+")":""}`).join("\n"); if(navigator.share){ navigator.share({text:txt}).catch(()=>copyText(txt)); } else copyText(txt); };
 $("refreshCalBtn").onclick = ()=> loadCal(true);
+$("refreshNewsBtn").onclick = ()=> loadNews(true);
 $("exportBtn").onclick = ()=> copyText(JSON.stringify(Object.assign({}, S, {finnhubKey: undefined, passphrase: undefined})));
 $("importBtn").onclick = ()=> promptText("Paste backup JSON", txt=>{ try{ const o = JSON.parse(txt); S = Object.assign(clone(DEFAULTS), o, {finnhubKey: S.finnhubKey, passphrase: S.passphrase}); save(); render(); refreshQuotes(); toast("Restored"); }catch(e){ toast("Not valid backup text"); } });
 $("resetBtn").onclick = ()=> promptConfirm("Reset holdings, watchlist, plan and alerts to the defaults? Your API key and passphrase are kept.", ()=>{ const k = S.finnhubKey, pp = S.passphrase; S = clone(DEFAULTS); S.finnhubKey = k; S.passphrase = pp; save(); render(); refreshQuotes(); });
@@ -569,7 +610,7 @@ document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState=
 window.addEventListener("online", ()=>{ refreshQuotes(); schedule(); });
 
 /* ---------- Boot ---------- */
-(function(){ let v = "portfolio"; try{ v = localStorage.getItem(LS+".view") || "portfolio"; }catch(e){} showView(["portfolio","watch","alerts","cal","settings"].includes(v)?v:"portfolio"); render(); refreshQuotes().then(schedule); if(S.passphrase) syncT212(false); })();
+(function(){ let v = "portfolio"; try{ v = localStorage.getItem(LS+".view") || "portfolio"; }catch(e){} showView(["portfolio","watch","news","alerts","cal","settings"].includes(v)?v:"portfolio"); render(); refreshQuotes().then(schedule); if(S.passphrase) syncT212(false); })();
 </script>
 </body>
 </html>
