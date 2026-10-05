@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stock Watch</title>
+<meta name="description" content="Live prices, allocation and price alerts for Raj's Trading 212 portfolio.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stock Watch">
+<meta name="theme-color" content="#0f1419" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one phone column, sticky summary at the top, fixed tab bar at the bottom. Numbers set in mono, labels in condensed caps. */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --panel-2:#eef1f5; --line:#dfe4ea;
+  --fg:#15202b; --fg-2:#5b6673; --fg-3:#8a95a3;
+  --accent:#1f4fd8; --accent-fg:#ffffff;
+  --up:#1a8f5a; --down:#d13b3b; --warn:#c77a05;
+  --up-bg:rgba(26,143,90,.12); --down-bg:rgba(209,59,59,.12); --warn-bg:rgba(199,122,5,.14);
+  --shadow:0 1px 2px rgba(21,32,43,.06), 0 8px 24px -16px rgba(21,32,43,.25);
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-cond:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --radius:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1419; --panel:#161c23; --panel-2:#1e262f; --line:#2a333d;
+    --fg:#e9edf1; --fg-2:#aab4bf; --fg-3:#6f7b88;
+    --accent:#6b8cff; --accent-fg:#0f1419;
+    --up:#3ccf86; --down:#ff6b6b; --warn:#f0b43c;
+    --up-bg:rgba(60,207,134,.14); --down-bg:rgba(255,107,107,.14); --warn-bg:rgba(240,180,60,.16);
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -16px rgba(0,0,0,.6);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1419; --panel:#161c23; --panel-2:#1e262f; --line:#2a333d;
+  --fg:#e9edf1; --fg-2:#aab4bf; --fg-3:#6f7b88;
+  --accent:#6b8cff; --accent-fg:#0f1419;
+  --up:#3ccf86; --down:#ff6b6b; --warn:#f0b43c;
+  --up-bg:rgba(60,207,134,.14); --down-bg:rgba(255,107,107,.14); --warn-bg:rgba(240,180,60,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -16px rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 var(--font);-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+input,select{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;min-width:0}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.label{font-family:var(--font-cond);font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+.up{color:var(--up)} .down{color:var(--down)} .warn{color:var(--warn)}
+
+/* Header */
+.hdr{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px;border-bottom:1px solid var(--line)}
+.hdr-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.hdr h1{margin:0;font:600 17px/1.2 var(--font-cond);letter-spacing:.02em}
+.status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--fg-3)}
+.dot.live{background:var(--up);box-shadow:0 0 0 3px var(--up-bg)}
+.dot.ext{background:var(--warn)}
+.total{display:flex;align-items:baseline;gap:12px;margin-top:6px;flex-wrap:wrap}
+.total .big{font-size:30px;font-weight:500;line-height:1.1}
+.total .chg{font-size:15px;font-weight:500}
+
+/* Main */
+main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:640px;margin:0 auto}
+.view{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px 0}
+.card-h h2{margin:0;font:600 14px/1.2 var(--font-cond);letter-spacing:.04em;text-transform:uppercase;color:var(--fg-2)}
+.rows{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:12px 14px;border-top:1px solid var(--line);align-items:center;width:100%;text-align:left}
+.rows .row:first-child{border-top:0}
+.row .sym{font-weight:600}
+.row .name{font-size:12px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.row .px{text-align:right;font-weight:500}
+.row .sub{text-align:right;font-size:12px;color:var(--fg-2)}
+.pill{display:inline-block;padding:2px 7px;border-radius:999px;font-size:12px;font-weight:500;font-family:var(--mono)}
+.pill.up{background:var(--up-bg)} .pill.down{background:var(--down-bg)} .pill.flat{background:var(--panel-2);color:var(--fg-2)} .pill.warn{background:var(--warn-bg)}
+.bar{height:10px;border-radius:999px;background:var(--panel-2);overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.bar .etf{background:var(--accent)} .bar .st{background:var(--fg-3)}
+.alloc{padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px}
+.alloc .legend{display:flex;justify-content:space-between;font-size:13px;color:var(--fg-2)}
+.note{font-size:13px;color:var(--fg-2);padding:0 14px 12px}
+.banner{border-radius:var(--radius);padding:12px 14px;display:flex;gap:10px;align-items:flex-start;border:1px solid transparent}
+.banner.warn{background:var(--warn-bg);border-color:var(--warn)}
+.banner.alert{background:var(--down-bg);border-color:var(--down)}
+.banner.info{background:var(--panel-2);border-color:var(--line)}
+.banner b{display:block}
+.banner .x{margin-left:auto;color:var(--fg-2);font-size:18px;line-height:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 14px;border-radius:10px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:14px}
+.btn.ghost{background:var(--panel-2);color:var(--fg)}
+.btn.sm{padding:6px 10px;font-size:13px}
+.btn.danger{background:var(--down-bg);color:var(--down)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;padding:0 14px 14px}
+.field{display:flex;flex-direction:column;gap:6px;padding:0 14px 12px}
+.field label{font-size:13px;color:var(--fg-2)}
+.field .hint{font-size:12px;color:var(--fg-3)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.inline{display:flex;gap:8px;align-items:center}
+.inline input{flex:1}
+.empty{padding:18px 14px;color:var(--fg-2);font-size:14px}
+.cal .row{grid-template-columns:auto 1fr auto}
+.cal .date{font-family:var(--mono);font-size:13px;color:var(--fg-2);min-width:62px}
+.tag{font-size:11px;color:var(--fg-3);font-family:var(--font-cond);letter-spacing:.06em;text-transform:uppercase}
+
+/* Tab bar */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;background:var(--panel);border-top:1px solid var(--line);padding:6px 6px calc(env(safe-area-inset-bottom,0px) + 6px)}
+.tabs button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;border-radius:10px;color:var(--fg-3);font:500 11px/1 var(--font-cond);letter-spacing:.04em;text-transform:uppercase}
+.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs button[aria-selected="true"]{color:var(--accent)}
+.tabs button .n{position:absolute;transform:translate(14px,-4px);background:var(--down);color:#fff;font-size:10px;border-radius:999px;padding:1px 5px}
+
+/* Sheet */
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.sheet .panel{background:var(--panel);width:100%;max-width:640px;max-height:88vh;overflow:auto;border-radius:18px 18px 0 0;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 18px);display:flex;flex-direction:column;gap:12px}
+.sheet .handle{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 4px}
+.sheet h3{margin:0;font:600 18px/1.2 var(--font-cond)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:14px}
+.kv dt{color:var(--fg-2)} .kv dd{margin:0;text-align:right}
+.news{display:flex;flex-direction:column;gap:10px}
+.news a{color:var(--fg);text-decoration:none;display:block;border-top:1px solid var(--line);padding-top:10px}
+.news a:first-child{border-top:0;padding-top:0}
+.news .src{font-size:12px;color:var(--fg-3)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;z-index:30;box-shadow:var(--shadow)}
+.range{height:6px;border-radius:3px;background:var(--panel-2);position:relative;margin:8px 0 2px}
+.range i{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--accent);transform:translateX(-50%)}
+.muted{color:var(--fg-3);font-size:12px}
+@media (prefers-reduced-motion: no-preference){
+  .row{transition:background .15s}
+  .row:active{background:var(--panel-2)}
+}
+</style>
+</head>
+<body>
+<header class="hdr">
+  <div class="hdr-row">
+    <h1>Stock Watch</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Loading</span></div>
+  </div>
+  <div class="total">
+    <span class="big num" id="total">—</span>
+    <span class="chg num" id="totalChg"></span>
+  </div>
+</header>
+
+<main>
+  <div id="banners" class="view"></div>
+
+  <!-- Portfolio -->
+  <section class="view" id="v-portfolio">
+    <div class="card">
+      <div class="card-h"><h2>Allocation</h2><span class="tag" id="allocTag"></span></div>
+      <div class="alloc">
+        <div class="bar"><i class="etf" id="barEtf" style="width:50%"></i><i class="st" id="barSt" style="width:50%"></i></div>
+        <div class="legend"><span>S&amp;P 500 ETF <b class="num" id="etfPct">—</b></span><span>Single stocks <b class="num" id="stPct">—</b></span></div>
+      </div>
+      <div class="note" id="allocNote"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Holdings</h2><span class="tag" id="fxTag"></span></div>
+      <div class="rows" id="holdRows"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Monthly plan</h2><span class="tag" id="planTag"></span></div>
+      <div class="rows" id="planRows"></div>
+    </div>
+  </section>
+
+  <!-- Watchlist -->
+  <section class="view" id="v-watch" hidden>
+    <div class="card">
+      <div class="card-h"><h2>Watchlist</h2><button class="btn ghost sm" id="addWatchBtn">+ Add</button></div>
+      <div class="rows" id="watchRows"></div>
+    </div>
+  </section>
+
+  <!-- Alerts -->
+  <section class="view" id="v-alerts" hidden>
+    <div class="card">
+      <div class="card-h"><h2>New alert</h2></div>
+      <div class="field"><label for="aSym">Stock</label><select id="aSym"></select></div>
+      <div class="field"><div class="grid2">
+        <div><label for="aCond">Condition</label><select id="aCond"><option value="below">Falls below</option><option value="above">Rises above</option><option value="dayDown">Drops in a day by %</option><option value="dayUp">Jumps in a day by %</option></select></div>
+        <div><label for="aVal">Value</label><input id="aVal" type="number" inputmode="decimal" step="any" placeholder="e.g. 1100"></div>
+      </div></div>
+      <div class="field"><label for="aNote">Why (optional)</label><input id="aNote" placeholder="e.g. add to Lilly after earnings dip"></div>
+      <div class="actions"><button class="btn" id="addAlertBtn">Add alert</button></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Active alerts</h2><button class="btn ghost sm" id="shareAlertsBtn">Copy for Claude</button></div>
+      <div class="rows" id="alertRows"></div>
+      <div class="note">Alerts fire inside this app while it is open. For lock-screen pushes, copy the list and paste it to Claude: the hourly checker will watch them during US market hours.</div>
+    </div>
+  </section>
+
+  <!-- Calendar -->
+  <section class="view" id="v-cal" hidden>
+    <div class="card cal">
+      <div class="card-h"><h2>Coming up</h2><button class="btn ghost sm" id="refreshCalBtn">Refresh</button></div>
+      <div class="rows" id="calRows"></div>
+      <div class="note" id="calNote"></div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="view" id="v-settings" hidden>
+    <div class="card">
+      <div class="card-h"><h2>Price feed</h2><span class="tag" id="keyTag"></span></div>
+      <div class="field">
+        <label for="fkey">Finnhub API key</label>
+        <div class="inline"><input id="fkey" type="password" autocomplete="off" placeholder="paste key"><button class="btn sm" id="saveKeyBtn">Save</button></div>
+        <div class="hint">Free at finnhub.io → Dashboard → API key. The key stays on this phone only.</div>
+      </div>
+      <div class="field">
+        <label for="fx">EUR/USD fallback rate</label>
+        <input id="fx" type="number" inputmode="decimal" step="0.0001">
+        <div class="hint">Used only if the live rate can't be fetched.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>S&amp;P 500 ETF (VUAA)</h2></div>
+      <div class="field"><label for="etfEur">Current value in € (from Trading 212)</label><div class="inline"><input id="etfEur" type="number" inputmode="decimal" step="0.01"><button class="btn sm" id="saveEtfBtn">Save</button></div><div class="hint">VUAA trades in Milan and the free feed can't price it, so enter the value from the app now and then. Its day move is estimated from the S&amp;P 500 and the euro.</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Holdings</h2><button class="btn ghost sm" id="addHoldBtn">+ Add</button></div>
+      <div class="rows" id="holdEdit"></div>
+      <div class="note">Shares are shown in Trading 212 under each position (switch the list to "Market price"). Fractions are fine.</div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Monthly plan</h2><button class="btn ghost sm" id="addPlanBtn">+ Weekly buy</button></div>
+      <div class="field"><label for="planEtf">ETF per month (€)</label><input id="planEtf" type="number" inputmode="decimal"></div>
+      <div class="rows" id="planEdit"></div>
+      <div class="actions"><button class="btn sm" id="savePlanBtn">Save plan</button></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Data</h2></div>
+      <div class="actions">
+        <button class="btn ghost sm" id="exportBtn">Copy backup</button>
+        <button class="btn ghost sm" id="importBtn">Paste backup</button>
+        <button class="btn danger sm" id="resetBtn">Reset to defaults</button>
+      </div>
+      <div class="note">Everything is stored on this phone. Nothing is sent anywhere except price requests to Finnhub. This app watches and alerts; it never trades.</div>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-v="portfolio" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 17V9M10 17V5M15 17v-7M20 17V8"/></svg>Portfolio</button>
+  <button role="tab" data-v="watch"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Watch</button>
+  <button role="tab" data-v="alerts"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0"/></svg>Alerts<span class="n" id="alertN" hidden></span></button>
+  <button role="tab" data-v="cal"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Dates</button>
+  <button role="tab" data-v="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+</nav>
+
+<div id="sheetHost"></div>
+<div id="toastHost"></div>
+
+<script>
+/* ---------- State ---------- */
+const DEFAULTS = {
+  finnhubKey: "",
+  eurusd: 1.17,
+  etf: { sym: "VUAA", name: "Vanguard S&P 500 (Acc)", eur: 0, asOf: "", proxy: "SPY" },
+  holdings: [
+    { sym: "NVDA", name: "Nvidia", qty: 0, refEur: 0 },
+    { sym: "META", name: "Meta Platforms", qty: 0, refEur: 0 },
+    { sym: "SPCX", name: "SpaceX", qty: 0, refEur: 0 },
+    { sym: "WMT",  name: "Walmart", qty: 0, refEur: 0 },
+    { sym: "LLY",  name: "Eli Lilly", qty: 0, refEur: 0 },
+    { sym: "MA",   name: "Mastercard", qty: 0, refEur: 0 }
+  ],
+  refDate: "",
+  watch: [
+    { sym: "AMZN", name: "Amazon" }, { sym: "JNJ", name: "Johnson & Johnson" },
+    { sym: "PEP", name: "PepsiCo" }, { sym: "KO", name: "Coca-Cola" },
+    { sym: "IONQ", name: "IonQ" }, { sym: "CRWD", name: "CrowdStrike" },
+    { sym: "FCX", name: "Freeport-McMoRan" }, { sym: "CEVA", name: "CEVA" }
+  ],
+  plan: { etfMonthly: 0, weekly: [] },
+  alerts: [],
+  dismissed: []
+};
+// Catalysts known from research in early October 2026; the Finnhub earnings calendar replaces these when it answers.
+const KNOWN_EVENTS = [
+  { date: "2026-10-08", sym: "PEP",  what: "Q3 earnings" },
+  { date: "2026-10-29", sym: "LLY",  what: "Q3 earnings" },
+  { date: "2026-10-29", sym: "META", what: "Q3 earnings (approx.)", approx: true },
+  { date: "2026-10-30", sym: "AMZN", what: "Q3 earnings (approx.)", approx: true },
+  { date: "2026-10-30", sym: "MA",   what: "Q3 earnings (approx.)", approx: true },
+  { date: "2026-11-05", sym: "SPCX", what: "Q3 earnings" },
+  { date: "2026-11-11", sym: "CEVA", what: "Q3 earnings (approx.)", approx: true },
+  { date: "2026-11-19", sym: "NVDA", what: "Q3 earnings (approx.)", approx: true },
+  { date: "2026-11-19", sym: "WMT",  what: "Q3 earnings (approx.)", approx: true },
+  { date: "2026-12-01", sym: "CRWD", what: "Q3 earnings" }
+];
+const LS = "stockwatch.v1";
+const clone = o => JSON.parse(JSON.stringify(o));
+let S = load();
+let Q = {};            // quotes by symbol: {c,d,dp,h,l,o,pc,t,at}
+let FX = null;         // live EUR/USD
+let timer = null, backoffUntil = 0, failures = 0;
+let view = "portfolio";
+let calCache = null;
+
+function load(){ try{ const raw = localStorage.getItem(LS); if(raw){ const s = JSON.parse(raw); return Object.assign(clone(DEFAULTS), s); } }catch(e){} return clone(DEFAULTS); }
+function save(){ try{ localStorage.setItem(LS, JSON.stringify(S)); }catch(e){} }
+
+/* ---------- Helpers ---------- */
+const $ = id => document.getElementById(id);
+const fmtEur = n => n == null || isNaN(n) ? "—" : new Intl.NumberFormat("nl-NL",{style:"currency",currency:"EUR",maximumFractionDigits:2}).format(n);
+const fmtUsd = n => n == null || isNaN(n) ? "—" : "$" + n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtPct = n => n == null || isNaN(n) ? "" : (n>0?"+":"") + n.toFixed(2) + "%";
+const sign = n => n > 0.0001 ? "up" : n < -0.0001 ? "down" : "flat";
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function nyNow(){ const d = new Date(); const p = new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour12:false,weekday:"short",hour:"2-digit",minute:"2-digit"}).formatToParts(d); const o={}; p.forEach(x=>o[x.type]=x.value); return { wd:o.weekday, mins: (+o.hour%24)*60 + (+o.minute) }; }
+function session(){ const {wd,mins} = nyNow(); if(wd==="Sat"||wd==="Sun") return "closed"; if(mins>=570 && mins<960) return "open"; if(mins>=240 && mins<570) return "pre"; if(mins>=960 && mins<1200) return "post"; return "closed"; }
+function pollMs(){ const s = session(); return s==="open" ? 20000 : (s==="pre"||s==="post") ? 60000 : 300000; }
+const rate = () => FX || S.eurusd || 1;
+function toast(msg){ const t = document.createElement("div"); t.className="toast"; t.textContent = msg; $("toastHost").appendChild(t); setTimeout(()=>t.remove(), 2200); }
+function allSyms(){ const set = new Set(); S.holdings.forEach(h=>set.add(h.sym)); S.watch.forEach(w=>set.add(w.sym)); return [...set]; }
+function nameOf(sym){ const h = S.holdings.find(x=>x.sym===sym) || S.watch.find(x=>x.sym===sym); return h ? h.name : sym; }
+async function copyText(txt){ try{ await navigator.clipboard.writeText(txt); toast("Copied"); return true; }catch(e){ const ta=document.createElement("textarea"); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy"); toast("Copied");}catch(_){ toast("Select and copy manually"); } ta.remove(); } }
+
+/* ---------- Finnhub ---------- */
+async function fh(path, params){
+  if(!S.finnhubKey) throw new Error("nokey");
+  if(Date.now() < backoffUntil) throw new Error("backoff");
+  const u = new URL("https://finnhub.io/api/v1/" + path);
+  Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
+  u.searchParams.set("token", S.finnhubKey);
+  const r = await fetch(u.toString());
+  if(r.status === 429){ backoffUntil = Date.now() + 60000; throw new Error("ratelimit"); }
+  if(r.status === 401 || r.status === 403){ throw new Error("badkey"); }
+  if(!r.ok) throw new Error("http" + r.status);
+  return r.json();
+}
+async function refreshQuotes(){
+  if(!S.finnhubKey){ setStatus("No API key", ""); render(); return; }
+  const syms = allSyms(); if(S.etf.proxy) syms.push(S.etf.proxy);
+  setStatus("Updating…", session());
+  let ok = 0, bad = null;
+  // Live FX first (free OANDA quote); fall back to manual rate silently.
+  try{ const f = await fh("quote",{symbol:"OANDA:EUR_USD"}); if(f && f.c > 0.5 && f.c < 2){ FX = f.c; Q["EURUSD"] = Object.assign(f,{at:Date.now()}); } }catch(e){}
+  for(const s of syms){
+    try{ const q = await fh("quote",{symbol:s}); if(q && typeof q.c === "number" && q.c > 0){ Q[s] = Object.assign(q,{at:Date.now()}); ok++; } }
+    catch(e){ bad = e.message; if(e.message==="badkey"||e.message==="ratelimit"||e.message==="backoff") break; }
+  }
+  if(bad === "badkey"){ setStatus("API key rejected", ""); failures++; }
+  else if(bad === "ratelimit" || bad === "backoff"){ setStatus("Rate limit, pausing 1 min", session()); }
+  else if(ok === 0){ failures++; setStatus(navigator.onLine ? "Feed unreachable" : "Offline", ""); }
+  else { failures = 0; setStatus(sessionLabel(), session()); }
+  checkAlerts(); render();
+}
+function sessionLabel(){ const s = session(); const t = new Date().toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}); return (s==="open"?"Live":s==="pre"?"Pre-market":s==="post"?"After hours":"Market closed") + " · " + t; }
+function setStatus(txt, s){ $("status").textContent = txt; const d = $("dot"); d.className = "dot" + (s==="open"?" live":(s==="pre"||s==="post")?" ext":""); }
+function schedule(){ clearTimeout(timer); timer = setTimeout(async()=>{ await refreshQuotes(); schedule(); }, pollMs()); }
+
+/* ---------- Valuation ---------- */
+function usdEur(usd){ return usd / rate(); }
+function holdingValue(h){ const q = Q[h.sym]; if(h.qty > 0 && q) return { eur: usdEur(h.qty*q.c), day: usdEur(h.qty*q.d), live:true }; if(h.refEur > 0) return { eur: h.refEur, day: 0, live:false }; return { eur: 0, day: 0, live:false }; }
+function etfValue(){ const p = Q[S.etf.proxy]; const fx = Q["EURUSD"]; let dp = p ? p.dp : 0; if(fx && fx.pc > 0.5 && fx.pc < 2) dp -= ((fx.c - fx.pc)/fx.pc)*100; const base = S.etf.eur || 0; const day = base * dp/100; return { eur: base + day, day, dp, est: !!p }; }
+function totals(){ let st = 0, stDay = 0, live = 0, n = 0; S.holdings.forEach(h=>{ const v = holdingValue(h); st += v.eur; stDay += v.day; n++; if(v.live) live++; }); const e = etfValue(); return { etf: e.eur, st, total: e.eur + st, day: e.day + stDay, live, n }; }
+
+/* ---------- Alerts ---------- */
+function checkAlerts(){
+  let fired = false;
+  S.alerts.forEach(a=>{ if(a.firedAt) return; const q = Q[a.sym]; if(!q) return; let hit = false;
+    if(a.cond==="below" && q.c <= a.val) hit = true; if(a.cond==="above" && q.c >= a.val) hit = true;
+    if(a.cond==="dayDown" && q.dp <= -Math.abs(a.val)) hit = true; if(a.cond==="dayUp" && q.dp >= Math.abs(a.val)) hit = true;
+    if(hit){ a.firedAt = Date.now(); a.firedPx = q.c; fired = true; notify(a); } });
+  if(fired) save();
+}
+function notify(a){ const msg = `${a.sym} ${condText(a)} · now ${fmtUsd(a.firedPx)}`; try{ if("Notification" in window && Notification.permission === "granted") new Notification("Stock Watch", {body: msg}); }catch(e){} try{ navigator.vibrate && navigator.vibrate([80,40,80]); }catch(e){} }
+function condText(a){ return a.cond==="below" ? `fell below ${fmtUsd(a.val)}` : a.cond==="above" ? `rose above ${fmtUsd(a.val)}` : a.cond==="dayDown" ? `dropped ${Math.abs(a.val)}% today` : `jumped ${Math.abs(a.val)}% today`; }
+function condPending(a){ return a.cond==="below" ? `below ${fmtUsd(a.val)}` : a.cond==="above" ? `above ${fmtUsd(a.val)}` : a.cond==="dayDown" ? `−${Math.abs(a.val)}% in a day` : `+${Math.abs(a.val)}% in a day`; }
+
+/* ---------- Render ---------- */
+function render(){
+  const t = totals();
+  $("total").textContent = t.total > 0 ? fmtEur(t.total) : "—";
+  const tc = $("totalChg"); tc.textContent = t.total > 0 ? `${t.day>=0?"+":"−"}${fmtEur(Math.abs(t.day))} today` : ""; tc.className = "chg num " + sign(t.day);
+  // allocation
+  const etfPct = t.total > 0 ? t.etf/t.total*100 : 0;
+  $("etfPct").textContent = t.total > 0 ? etfPct.toFixed(0)+"%" : "—"; $("stPct").textContent = t.total>0 ? (100-etfPct).toFixed(0)+"%" : "—";
+  $("barEtf").style.width = (t.total>0?etfPct:50)+"%"; $("barSt").style.width = (t.total>0?100-etfPct:50)+"%";
+  const tag = $("allocTag"); if(t.total>0){ tag.textContent = etfPct >= 50 ? "On plan" : "Below 50%"; tag.className = "tag " + (etfPct>=50?"up":"warn"); } else tag.textContent = "";
+  $("allocNote").textContent = t.total>0 ? (etfPct >= 50 ? `The index fund is ${etfPct.toFixed(0)}% of the portfolio; single stocks ${(100-etfPct).toFixed(0)}%.` : `Single stocks have grown past the index fund. Topping up VUAA by ${fmtEur(Math.max(0, t.st - t.etf))} would restore 50/50.`) : "Enter your share counts in Settings to see the live split.";
+  $("fxTag").textContent = "EUR/USD " + rate().toFixed(4) + (FX ? "" : " (manual)");
+  // holdings
+  const hr = $("holdRows"); hr.innerHTML = "";
+  const rows = [{ etf:true }].concat(S.holdings);
+  rows.forEach(h=>{
+    const b = document.createElement("button"); b.className = "row";
+    if(h.etf){ const e = etfValue(); b.innerHTML = `<div><div class="sym">${esc(S.etf.sym)}</div><div class="name">${esc(S.etf.name)}</div></div><div><div class="px num">${fmtEur(e.eur)}</div><div class="sub"><span class="pill ${sign(e.dp)}">${e.est ? fmtPct(e.dp) : "—"}</span> <span class="muted">${e.est?"est. via S&P":""}</span></div></div>`; b.onclick = ()=>openSheet(S.etf.proxy, S.etf.name + " (via SPY)"); hr.appendChild(b); return; }
+    const q = Q[h.sym]; const v = holdingValue(h);
+    b.innerHTML = `<div><div class="sym">${esc(h.sym)}</div><div class="name">${esc(h.name)}${v.live?"":(h.qty>0?"":" · tap Settings to add shares")}</div></div><div><div class="px num">${q ? fmtUsd(q.c) : "—"}</div><div class="sub">${q?`<span class="pill ${sign(q.dp)}">${fmtPct(q.dp)}</span>`:""} <span class="num">${v.eur>0 ? fmtEur(v.eur) : ""}</span>${v.live?"":(v.eur>0&&S.refDate?` <span class="muted">${esc(S.refDate.slice(5))}</span>`:"")}</div></div>`;
+    b.onclick = ()=>openSheet(h.sym, h.name); hr.appendChild(b);
+  });
+  // plan
+  const pr = $("planRows"); pr.innerHTML = ""; const weeklyTotal = S.plan.weekly.reduce((a,w)=>a+(+w.amt||0),0); const monthlySt = weeklyTotal*52/12; const monthlyTotal = (+S.plan.etfMonthly||0) + monthlySt; const planEtfPct = monthlyTotal>0 ? (+S.plan.etfMonthly||0)/monthlyTotal*100 : 0;
+  $("planTag").textContent = monthlyTotal>0 ? `ETF ${planEtfPct.toFixed(0)}% of ${fmtEur(monthlyTotal)}/mo` : "";
+  $("planTag").className = "tag " + (planEtfPct>=50?"up":"warn");
+  const planLine = (l, r) => { const d = document.createElement("div"); d.className="row"; d.innerHTML = `<div class="sym">${esc(l)}</div><div class="px num">${esc(r)}</div>`; pr.appendChild(d); };
+  planLine(S.etf.sym + " monthly", fmtEur(+S.plan.etfMonthly||0));
+  S.plan.weekly.forEach(w=> planLine(`${w.sym} weekly`, fmtEur(+w.amt||0) + " · " + fmtEur((+w.amt||0)*52/12) + "/mo"));
+  // watchlist
+  const wr = $("watchRows"); wr.innerHTML = "";
+  if(!S.watch.length) wr.innerHTML = `<div class="empty">No stocks on the watchlist yet.</div>`;
+  S.watch.forEach(w=>{ const q = Q[w.sym]; const b = document.createElement("button"); b.className="row"; b.innerHTML = `<div><div class="sym">${esc(w.sym)}</div><div class="name">${esc(w.name)}</div></div><div><div class="px num">${q?fmtUsd(q.c):"—"}</div><div class="sub">${q?`<span class="pill ${sign(q.dp)}">${fmtPct(q.dp)}</span>`:""}</div></div>`; b.onclick = ()=>openSheet(w.sym, w.name); wr.appendChild(b); });
+  // alerts
+  const ar = $("alertRows"); ar.innerHTML = ""; const fired = S.alerts.filter(a=>a.firedAt).length; const n = $("alertN"); n.hidden = !fired; n.textContent = fired;
+  if(!S.alerts.length) ar.innerHTML = `<div class="empty">No alerts yet. Add one above, for example "LLY falls below 1100".</div>`;
+  S.alerts.forEach(a=>{ const d = document.createElement("div"); d.className="row"; d.innerHTML = `<div><div class="sym">${esc(a.sym)} <span class="pill ${a.firedAt?"down":"flat"}">${a.firedAt ? "fired" : condPending(a)}</span></div><div class="name">${a.firedAt ? esc(condText(a)) + " · " + new Date(a.firedAt).toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) : esc(a.note||"")}</div></div><div><button class="btn ghost sm" data-del="${a.id}">Remove</button></div>`; ar.appendChild(d); });
+  ar.querySelectorAll("[data-del]").forEach(b=> b.onclick = ()=>{ S.alerts = S.alerts.filter(a=>a.id!==b.dataset.del); save(); render(); });
+  // symbol select
+  const sel = $("aSym"); const cur = sel.value; sel.innerHTML = allSyms().map(s=>`<option value="${esc(s)}">${esc(s)} · ${esc(nameOf(s))}</option>`).join(""); if(cur) sel.value = cur;
+  // settings
+  $("keyTag").textContent = S.finnhubKey ? "key saved" : "no key"; $("keyTag").className = "tag " + (S.finnhubKey?"up":"warn");
+  if(document.activeElement !== $("fx")) $("fx").value = S.eurusd; if(document.activeElement !== $("etfEur")) $("etfEur").value = S.etf.eur;
+  const he = $("holdEdit"); he.innerHTML = ""; S.holdings.forEach((h,i)=>{ const d = document.createElement("div"); d.className="row"; d.innerHTML = `<div><div class="sym">${esc(h.sym)}</div><div class="name">${esc(h.name)}</div></div><div class="inline"><input type="number" inputmode="decimal" step="any" style="width:110px" data-qty="${i}" value="${h.qty||""}" placeholder="shares" aria-label="${esc(h.sym)} shares"><button class="btn ghost sm" data-rm="${i}">✕</button></div>`; he.appendChild(d); });
+  he.querySelectorAll("[data-qty]").forEach(inp=> inp.onchange = ()=>{ S.holdings[+inp.dataset.qty].qty = parseFloat(inp.value)||0; save(); render(); });
+  he.querySelectorAll("[data-rm]").forEach(b=> b.onclick = ()=>{ S.holdings.splice(+b.dataset.rm,1); save(); render(); });
+  if(document.activeElement !== $("planEtf")) $("planEtf").value = S.plan.etfMonthly;
+  const pe = $("planEdit"); pe.innerHTML = ""; if(!S.plan.weekly.length) pe.innerHTML = `<div class="empty">No weekly buys yet. Tap "+ Weekly buy".</div>`;
+  S.plan.weekly.forEach((w,i)=>{ const d = document.createElement("div"); d.className="row"; d.innerHTML = `<div class="sym">${esc(w.sym)} weekly €</div><div class="inline"><input type="number" inputmode="decimal" step="1" style="width:90px" data-pw="${i}" value="${w.amt}" aria-label="${esc(w.sym)} weekly amount"><button class="btn ghost sm" data-prm="${i}">✕</button></div>`; pe.appendChild(d); });
+  pe.querySelectorAll("[data-prm]").forEach(b=> b.onclick = ()=>{ S.plan.weekly.splice(+b.dataset.prm,1); save(); render(); });
+  renderBanners(t, etfPct);
+  renderCal();
+}
+function renderBanners(t, etfPct){
+  const host = $("banners"); host.innerHTML = "";
+  const add = (cls, title, body, key) => { if(key && S.dismissed.includes(key)) return; const d = document.createElement("div"); d.className = "banner " + cls; d.innerHTML = `<div><b>${esc(title)}</b>${esc(body)}</div>` + (key?`<button class="x" aria-label="Dismiss">×</button>`:""); if(key) d.querySelector(".x").onclick = ()=>{ S.dismissed.push(key); save(); render(); }; host.appendChild(d); };
+  if(!S.finnhubKey) add("info", "Add your free Finnhub key", "Settings → Price feed. Prices stay blank until then.");
+  S.alerts.filter(a=>a.firedAt).forEach(a=> add("alert", `${a.sym} ${condText(a)}`, a.note ? a.note : "Open Alerts to review or remove.", "alert-"+a.id+"-"+a.firedAt));
+  if(t.total>0 && etfPct < 45) add("warn", "Index fund below 45%", "Single stocks are now the larger part of the portfolio.", "alloc-"+new Date().toISOString().slice(0,10));
+  allSyms().forEach(s=>{ const q = Q[s]; if(q && Math.abs(q.dp) >= 5) add(q.dp>0?"info":"warn", `${s} ${fmtPct(q.dp)} today`, nameOf(s) + " at " + fmtUsd(q.c) + ".", "move-"+s+"-"+new Date().toISOString().slice(0,10)); });
+}
+
+/* ---------- Calendar ---------- */
+async function loadCal(force){
+  const today = new Date().toISOString().slice(0,10);
+  try{ const c = JSON.parse(localStorage.getItem(LS+".cal")||"null"); if(c && !force && c.day === today){ calCache = c; renderCal(); return; } }catch(e){}
+  if(!S.finnhubKey){ renderCal(); return; }
+  const to = new Date(Date.now()+75*864e5).toISOString().slice(0,10); const ev = []; let okAny = false;
+  for(const s of allSyms()){ try{ const r = await fh("calendar/earnings",{from:today,to,symbol:s}); okAny = true; (r.earningsCalendar||[]).forEach(e=> ev.push({ date:e.date, sym:e.symbol, what:"Earnings" + (e.hour==="bmo"?" (before open)":e.hour==="amc"?" (after close)":""), eps:e.epsEstimate })); }catch(e){ if(e.message==="ratelimit"||e.message==="badkey"||e.message==="backoff") break; } }
+  calCache = { day: today, ev, ok: okAny }; try{ localStorage.setItem(LS+".cal", JSON.stringify(calCache)); }catch(e){}
+  renderCal();
+}
+function renderCal(){
+  const r = $("calRows"); r.innerHTML = ""; const today = new Date().toISOString().slice(0,10);
+  let ev = (calCache && calCache.ev && calCache.ev.length) ? calCache.ev.slice() : [];
+  const have = new Set(ev.map(e=>e.sym));
+  KNOWN_EVENTS.filter(k=> !have.has(k.sym) && k.date >= today && allSyms().includes(k.sym)).forEach(k=> ev.push(k));
+  ev = ev.filter(e=>e.date >= today).sort((a,b)=> a.date.localeCompare(b.date));
+  if(!ev.length) r.innerHTML = `<div class="empty">Nothing scheduled in the next 10 weeks.</div>`;
+  ev.forEach(e=>{ const d = document.createElement("div"); d.className="row"; const dt = new Date(e.date+"T12:00:00"); const days = Math.round((dt - new Date(today+"T12:00:00"))/864e5); d.innerHTML = `<div class="date">${dt.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</div><div><div class="sym">${esc(e.sym)} <span class="muted">${esc(nameOf(e.sym))}</span></div><div class="name">${esc(e.what)}${e.eps!=null?` · EPS est. ${(+e.eps).toFixed(2)}`:""}</div></div><div class="sub">${days===0?"today":days===1?"tomorrow":"in "+days+"d"}</div>`; r.appendChild(d); });
+  $("calNote").textContent = calCache && calCache.ok ? "Earnings dates from Finnhub; rows marked approx. come from research and should be confirmed." : (S.finnhubKey ? "Expected dates from research; tap Refresh to load the live earnings calendar." : "Expected dates from research. Add a Finnhub key for the live calendar.");
+}
+
+/* ---------- Detail sheet ---------- */
+async function openSheet(sym, name){
+  const host = $("sheetHost"); const q = Q[sym];
+  host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(sym)} <span class="muted">${esc(name)}</span></h3>
+    <div class="kv"><dt>Price</dt><dd class="num">${q?fmtUsd(q.c):"—"} ${q?`<span class="pill ${sign(q.dp)}">${fmtPct(q.dp)}</span>`:""}</dd><dt>Previous close</dt><dd class="num">${q?fmtUsd(q.pc):"—"}</dd><dt>Day range</dt><dd class="num">${q?fmtUsd(q.l)+" – "+fmtUsd(q.h):"—"}</dd><dt>Updated</dt><dd class="num">${q&&q.t?new Date(q.t*1000).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}):"—"} NL</dd></div>
+    <div id="metric"><span class="muted">Loading 52-week range…</span></div>
+    <div class="actions" style="padding:0"><button class="btn sm" id="shAlert">Set alert</button><a class="btn ghost sm" href="https://finance.yahoo.com/quote/${encodeURIComponent(sym)}" target="_blank" rel="noopener">Yahoo Finance</a><button class="btn ghost sm" id="shClose">Close</button></div>
+    <div class="label">Recent news</div><div class="news" id="news"><span class="muted">Loading…</span></div></div></div>`;
+  const close = ()=> host.innerHTML = ""; host.querySelector(".sheet").onclick = e=>{ if(e.target.classList.contains("sheet")) close(); }; $("shClose").onclick = close;
+  $("shAlert").onclick = ()=>{ close(); $("aSym").value = sym; $("aVal").value = q ? Math.round(q.c*0.95) : ""; $("aCond").value="below"; showView("alerts"); $("aVal").focus(); };
+  if(!S.finnhubKey){ $("metric").innerHTML = ""; $("news").innerHTML = `<span class="muted">Add a Finnhub key to load news.</span>`; return; }
+  try{ const m = await fh("stock/metric",{symbol:sym,metric:"all"}); const md = m.metric||{}; const hi = md["52WeekHigh"], lo = md["52WeekLow"]; if(hi && lo && q){ const pos = Math.max(0,Math.min(100,(q.c-lo)/(hi-lo)*100)); $("metric").innerHTML = `<div class="kv"><dt>52-week range</dt><dd class="num">${fmtUsd(lo)} – ${fmtUsd(hi)}</dd>${md.peTTM?`<dt>P/E (trailing)</dt><dd class="num">${(+md.peTTM).toFixed(1)}</dd>`:""}${md.dividendYieldIndicatedAnnual?`<dt>Dividend yield</dt><dd class="num">${(+md.dividendYieldIndicatedAnnual).toFixed(2)}%</dd>`:""}</div><div class="range"><i style="left:${pos}%"></i></div><div class="muted">${pos>95?"At the top of its 52-week range":pos<5?"At the bottom of its 52-week range":pos.toFixed(0)+"% of the way from low to high"}</div>`; } else $("metric").innerHTML = ""; }catch(e){ $("metric").innerHTML = ""; }
+  try{ const to = new Date().toISOString().slice(0,10), from = new Date(Date.now()-7*864e5).toISOString().slice(0,10); const n = await fh("company-news",{symbol:sym,from,to}); const items = (n||[]).slice(0,6); $("news").innerHTML = items.length ? items.map(i=>`<a href="${esc(i.url)}" target="_blank" rel="noopener"><div>${esc(i.headline)}</div><div class="src">${esc(i.source)} · ${new Date(i.datetime*1000).toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</div></a>`).join("") : `<span class="muted">No news in the last week.</span>`; }catch(e){ $("news").innerHTML = `<span class="muted">News unavailable${e.message==="ratelimit"?" (rate limit)":""}.</span>`; }
+}
+
+/* ---------- Views & events ---------- */
+function showView(v){ view = v; ["portfolio","watch","alerts","cal","settings"].forEach(k=>{ $("v-"+k).hidden = k!==v; }); document.querySelectorAll(".tabs button").forEach(b=> b.setAttribute("aria-selected", b.dataset.v===v)); try{ localStorage.setItem(LS+".view", v); }catch(e){} if(v==="cal") loadCal(false); window.scrollTo(0,0); }
+document.querySelectorAll(".tabs button").forEach(b=> b.onclick = ()=> showView(b.dataset.v));
+$("saveKeyBtn").onclick = async ()=>{ S.finnhubKey = $("fkey").value.trim(); save(); $("fkey").value = ""; toast(S.finnhubKey ? "Key saved, loading prices" : "Key cleared"); await refreshQuotes(); schedule(); };
+$("fx").onchange = ()=>{ S.eurusd = parseFloat($("fx").value)||1.17; save(); render(); };
+$("saveEtfBtn").onclick = ()=>{ S.etf.eur = parseFloat($("etfEur").value)||0; S.etf.asOf = new Date().toISOString().slice(0,10); save(); render(); toast("ETF value saved"); };
+$("addHoldBtn").onclick = ()=> promptSymbol("Add holding", (sym,name)=>{ if(!S.holdings.find(h=>h.sym===sym)) S.holdings.push({sym,name,qty:0,refEur:0}); save(); render(); refreshQuotes(); });
+$("addWatchBtn").onclick = ()=> promptSymbol("Add to watchlist", (sym,name)=>{ if(!S.watch.find(h=>h.sym===sym)) S.watch.push({sym,name}); save(); render(); refreshQuotes(); });
+$("addPlanBtn").onclick = ()=> promptSymbol("Add weekly buy", (sym)=>{ if(!S.plan.weekly.find(w=>w.sym===sym)) S.plan.weekly.push({sym, amt: 10}); save(); render(); showView("settings"); });
+$("savePlanBtn").onclick = ()=>{ S.plan.etfMonthly = parseFloat($("planEtf").value)||0; document.querySelectorAll("[data-pw]").forEach(i=> S.plan.weekly[+i.dataset.pw].amt = parseFloat(i.value)||0); save(); render(); toast("Plan saved"); };
+$("addAlertBtn").onclick = ()=>{ const sym = $("aSym").value, cond = $("aCond").value, val = parseFloat($("aVal").value); if(!sym || isNaN(val)){ toast("Enter a value"); return; } S.alerts.push({ id: Math.random().toString(36).slice(2,9), sym, cond, val, note: $("aNote").value.trim(), firedAt: null }); save(); $("aVal").value=""; $("aNote").value=""; checkAlerts(); render(); toast("Alert added"); try{ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }catch(e){} };
+$("shareAlertsBtn").onclick = ()=>{ const act = S.alerts.filter(a=>!a.firedAt); if(!act.length){ toast("No active alerts"); return; } const txt = "Please watch these price alerts for me:\n" + act.map(a=>`- ${a.sym} ${condPending(a)}${a.note?" ("+a.note+")":""}`).join("\n"); if(navigator.share){ navigator.share({text:txt}).catch(()=>copyText(txt)); } else copyText(txt); };
+$("refreshCalBtn").onclick = ()=> loadCal(true);
+$("exportBtn").onclick = ()=> copyText(JSON.stringify(Object.assign({}, S, {finnhubKey: undefined})));
+$("importBtn").onclick = ()=> promptText("Paste backup JSON", txt=>{ try{ const o = JSON.parse(txt); S = Object.assign(clone(DEFAULTS), o, {finnhubKey: S.finnhubKey}); save(); render(); refreshQuotes(); toast("Restored"); }catch(e){ toast("Not valid backup text"); } });
+$("resetBtn").onclick = ()=> promptConfirm("Reset holdings, watchlist, plan and alerts to the defaults? Your API key is kept.", ()=>{ const k = S.finnhubKey; S = clone(DEFAULTS); S.finnhubKey = k; save(); render(); refreshQuotes(); });
+
+function promptSymbol(title, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(title)}</h3><div class="field" style="padding:0"><label for="pSym">Ticker (US listing)</label><input id="pSym" autocapitalize="characters" placeholder="e.g. AMZN"></div><div class="field" style="padding:0"><label for="pName">Name</label><input id="pName" placeholder="e.g. Amazon"></div><div class="actions" style="padding:0"><button class="btn sm" id="pOk">Add</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ const sym = $("pSym").value.trim().toUpperCase(); if(!sym) return; cb(sym, $("pName").value.trim()||sym); close(); }; $("pSym").focus(); }
+function promptText(title, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(title)}</h3><div class="field" style="padding:0"><input id="pTxt" placeholder="paste here"></div><div class="actions" style="padding:0"><button class="btn sm" id="pOk">Restore</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ cb($("pTxt").value); close(); }; }
+function promptConfirm(msg, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>Are you sure?</h3><p style="margin:0">${esc(msg)}</p><div class="actions" style="padding:0"><button class="btn danger sm" id="pOk">Yes, reset</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ cb(); close(); }; }
+
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible"){ refreshQuotes(); schedule(); } else clearTimeout(timer); });
+window.addEventListener("online", ()=>{ refreshQuotes(); schedule(); });
+
+/* ---------- Boot ---------- */
+(function(){ let v = "portfolio"; try{ v = localStorage.getItem(LS+".view") || "portfolio"; }catch(e){} showView(["portfolio","watch","alerts","cal","settings"].includes(v)?v:"portfolio"); render(); refreshQuotes().then(schedule); })();
+</script>
+</body>
+</html>
