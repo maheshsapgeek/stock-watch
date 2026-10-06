@@ -9,7 +9,7 @@ on:
     - cron: "30 13-21 * * 1-5"
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write   # the job force-pushes the latest public data snapshot to the "data" branch
   pages: write
   id-token: write
 concurrency:
@@ -45,6 +45,18 @@ jobs:
         run: |
           pip install -q "yfinance>=0.2.60" pandas lxml requests
           python sync/losers.py
+      - name: Publish public data snapshot to the "data" branch (losers + universe only; nothing personal)
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          rm -rf /tmp/snap && mkdir -p /tmp/snap
+          cp site/data/losers.json /tmp/snap/ 2>/dev/null || echo '{"ok":false,"reason":"not built"}' > /tmp/snap/losers.json
+          cp site/data/universe.json /tmp/snap/ 2>/dev/null || true
+          cd /tmp/snap && git init -q && git checkout -q -b data && git add -A
+          git -c user.name="stock-watch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "snapshot $(date -u +%FT%TZ)"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
