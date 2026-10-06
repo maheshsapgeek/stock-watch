@@ -48,51 +48,88 @@ RULES = [
 ]
 
 
+LOG = []
+
+
 def log(*a):
-    print(*a, flush=True)
+    line = " ".join(str(x) for x in a)
+    print(line, flush=True)
+    LOG.append(line)
 
 
 def yahoo_symbol(sym):
     return sym.replace(".", "-")
 
 
-def fetch_wiki_table(url, col_candidates):
-    r = requests.get(url, headers=UA, timeout=30)
+SYM_RX = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
+
+# Nasdaq-100 names that are not in the S&P 500, plus the stocks Raj follows, so his names show up when they fall hard.
+EXTRAS = [
+    "PDD", "MELI", "ASML", "AZN", "TEAM", "DDOG", "ZS", "ARM", "MSTR", "MRVL", "CSGP", "LULU", "ON", "BIIB", "GFS",
+    "SPCX", "RKLB", "IONQ", "NBIS", "SOFI", "MP", "CEVA", "VST", "MU", "AVGO", "CRWD", "PLTR", "INTC",
+]
+SECTORS = {}
+
+
+def load_sp500():
+    """S&P 500 constituents from the 'datasets' CSV on GitHub (reliable, no HTML parsing)."""
+    r = requests.get("https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+                     headers=UA, timeout=30)
     r.raise_for_status()
-    tables = pd.read_html(io.StringIO(r.text))
-    for t in tables:
-        cols = [str(c).strip().lower() for c in t.columns]
-        for cand in col_candidates:
-            if cand in cols:
-                col = t.columns[cols.index(cand)]
-                syms = [str(s).strip().upper() for s in t[col].tolist()]
-                syms = [s for s in syms if re.fullmatch(r"[A-Z]{1,5}(\.[A-Z])?", s)]
-                if len(syms) > 50:
+    df = pd.read_csv(io.StringIO(r.text))
+    col = next(c for c in df.columns if str(c).strip().lower() == "symbol")
+    sec = next((c for c in df.columns if "sector" in str(c).lower()), None)
+    syms = []
+    for _, row in df.iterrows():
+        s = str(row[col]).strip().upper()
+        if SYM_RX.fullmatch(s):
+            syms.append(s)
+            if sec:
+                SECTORS[s] = str(row[sec])
+    if len(syms) < 400:
+        raise RuntimeError(f"only {len(syms)} S&P symbols parsed")
+    return syms
+
+
+def load_nasdaq100():
+    r = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=UA, timeout=30)
+    r.raise_for_status()
+    for t in pd.read_html(io.StringIO(r.text)):
+        cols = [" ".join(str(x) for x in c).lower() if isinstance(c, tuple) else str(c).lower() for c in t.columns]
+        for i, c in enumerate(cols):
+            if "ticker" in c or "symbol" in c:
+                syms = [str(s).strip().upper() for s in t.iloc[:, i].tolist()]
+                syms = [s for s in syms if SYM_RX.fullmatch(s)]
+                if len(syms) > 80:
                     return syms
-    raise RuntimeError(f"no symbol table at {url}")
+    raise RuntimeError("no Nasdaq-100 table found")
 
 
 def load_universe():
-    """S&P 500 + Nasdaq-100 tickers. Wikipedia first, then the copy published with the site, then a built-in list."""
+    """S&P 500 (+ Nasdaq-100 when reachable) + extras; then the copy published with the site; then a built-in list."""
     try:
-        sp = fetch_wiki_table("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", ["symbol"])
-        nq = fetch_wiki_table("https://en.wikipedia.org/wiki/Nasdaq-100", ["ticker", "symbol"])
-        syms = sorted(set(sp) | set(nq))
-        log(f"universe from Wikipedia: {len(sp)} S&P 500 + {len(nq)} Nasdaq-100 = {len(syms)}")
-        return syms, "wikipedia"
+        sp = load_sp500()
+        nq = []
+        try:
+            nq = load_nasdaq100()
+        except Exception as e:  # noqa: BLE001
+            log(f"Nasdaq-100 list failed (continuing with extras): {type(e).__name__}: {e}")
+        syms = sorted(set(sp) | set(nq) | set(EXTRAS))
+        log(f"universe: {len(sp)} S&P 500 + {len(nq)} Nasdaq-100 + extras = {len(syms)}")
+        return syms, "github+wikipedia" if nq else "github"
     except Exception as e:  # noqa: BLE001
-        log(f"Wikipedia universe failed: {type(e).__name__}: {e}")
+        log(f"S&P 500 list failed: {type(e).__name__}: {e}")
     try:
         r = requests.get(f"{PAGES_BASE}/data/universe.json", headers=UA, timeout=20)
         r.raise_for_status()
         syms = r.json().get("symbols") or []
-        if len(syms) > 100:
+        if len(syms) > 300:
             log(f"universe from cached copy: {len(syms)}")
-            return syms, "cached"
+            return sorted(set(syms) | set(EXTRAS)), "cached"
     except Exception as e:  # noqa: BLE001
         log(f"cached universe failed: {type(e).__name__}: {e}")
     log(f"universe from built-in fallback: {len(FALLBACK)}")
-    return FALLBACK, "fallback"
+    return sorted(set(FALLBACK) | set(EXTRAS)), "fallback"
 
 
 def download_bars(symbols):
@@ -185,13 +222,14 @@ def fundamentals(sym):
     g = info.get
     f = {
         "name": g("shortName") or g("longName") or sym,
-        "sector": g("sector"), "industry": g("industry"),
+        "sector": g("sector") or SECTORS.get(sym), "industry": g("industry"),
         "mcap": num(g("marketCap")),
         "peTTM": num(g("trailingPE")), "peFwd": num(g("forwardPE")), "ps": num(g("priceToSalesTrailing12Months")),
         "revGrowth": num(g("revenueGrowth")), "epsGrowth": num(g("earningsGrowth")),
         "opMargin": num(g("operatingMargins")), "netMargin": num(g("profitMargins")), "roe": num(g("returnOnEquity")),
         "cash": num(g("totalCash")), "debt": num(g("totalDebt")), "ebitda": num(g("ebitda")), "fcf": num(g("freeCashflow")),
-        "divYield": num(g("dividendYield")),
+        # trailingAnnualDividendYield is a fraction in every yfinance version; dividendYield switched to percent in 2025.
+        "divYield": (num(g("trailingAnnualDividendYield")) or 0) * 100 if g("trailingAnnualDividendYield") is not None else num(g("dividendYield")),
         "hi52": num(g("fiftyTwoWeekHigh")), "lo52": num(g("fiftyTwoWeekLow")), "beta": num(g("beta")),
         "target": num(g("targetMeanPrice")), "rec": g("recommendationKey"), "analysts": num(g("numberOfAnalystOpinions")),
         "earningsAt": None,
@@ -202,9 +240,8 @@ def fundamentals(sym):
             f["earningsAt"] = datetime.fromtimestamp(int(ts), tz=timezone.utc).date().isoformat()
         except Exception:  # noqa: BLE001
             pass
-    # yfinance reports dividendYield as a percent in newer versions and a fraction in older ones; normalise to percent.
-    if f["divYield"] is not None and f["divYield"] < 1:
-        f["divYield"] = f["divYield"] * 100
+    if f["divYield"] is not None and f["divYield"] > 25:  # no index name yields that; treat as a unit mix-up
+        f["divYield"] = None
     return f, news_for(tk)
 
 
@@ -318,7 +355,7 @@ def main():
         "ok": True, "at": now, "bar": bar, "universe": {"size": len(symbols), "priced": len(today), "source": source},
         "market": {"spy": ctx.get("SPY", {}).get("pct"), "qqq": ctx.get("QQQ", {}).get("pct"),
                    "pctDown": round(down / len(today) * 100) if today else None},
-        "rules": RULES, "losers": out,
+        "rules": RULES, "losers": out, "log": LOG[-60:],
     })
     log(f"wrote {OUT}: {len(out)} losers in {time.time()-t0:.0f}s")
     return 0
@@ -330,5 +367,5 @@ if __name__ == "__main__":
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         write({"ok": False, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-               "reason": f"{type(e).__name__}: {e}"[:200]})
+               "reason": f"{type(e).__name__}: {e}"[:200], "log": LOG[-60:]})
         sys.exit(1)
