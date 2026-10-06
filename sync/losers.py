@@ -94,15 +94,18 @@ def load_sp500():
 def load_nasdaq100():
     r = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=UA, timeout=30)
     r.raise_for_status()
-    for t in pd.read_html(io.StringIO(r.text)):
+    tables = pd.read_html(io.StringIO(r.text))
+    seen = []
+    for t in tables:
         cols = [" ".join(str(x) for x in c).lower() if isinstance(c, tuple) else str(c).lower() for c in t.columns]
+        seen.append((len(t), cols[:4]))
         for i, c in enumerate(cols):
             if "ticker" in c or "symbol" in c:
                 syms = [str(s).strip().upper() for s in t.iloc[:, i].tolist()]
                 syms = [s for s in syms if SYM_RX.fullmatch(s)]
                 if len(syms) > 80:
                     return syms
-    raise RuntimeError("no Nasdaq-100 table found")
+    raise RuntimeError(f"no Nasdaq-100 table among {len(tables)}: {seen[:6]}")
 
 
 def load_universe():
@@ -186,12 +189,21 @@ def num(v):
         return None
 
 
+NEWS_ERR = [0]
+
+
 def news_for(tk):
     items = []
+    raw = []
     try:
-        raw = tk.news or []
-    except Exception:  # noqa: BLE001
-        raw = []
+        raw = tk.get_news(count=6) if hasattr(tk, "get_news") else (tk.news or [])
+    except Exception as e:  # noqa: BLE001
+        if NEWS_ERR[0] < 3:
+            log(f"news failed for {getattr(tk, 'ticker', '?')}: {type(e).__name__}: {e}")
+        NEWS_ERR[0] += 1
+    if not raw and NEWS_ERR[0] < 3:
+        log(f"no news items returned for {getattr(tk, 'ticker', '?')}")
+        NEWS_ERR[0] += 1
     for n in raw[:5]:
         c = n.get("content") if isinstance(n, dict) and isinstance(n.get("content"), dict) else n
         title = c.get("title")
