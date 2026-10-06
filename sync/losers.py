@@ -92,7 +92,7 @@ def load_sp500():
 
 
 def load_nasdaq100():
-    r = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=UA, timeout=30)
+    r = requests.get("https://en.wikipedia.org/wiki/List_of_Nasdaq-100_companies", headers=UA, timeout=30)
     r.raise_for_status()
     tables = pd.read_html(io.StringIO(r.text))
     seen = []
@@ -192,18 +192,52 @@ def num(v):
 NEWS_ERR = [0]
 
 
-def news_for(tk):
+def google_news(sym, name):
+    """Latest headlines from the Google News RSS feed (no key needed). Titles end in ' - Source'."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+
+    short = re.sub(r",? (inc\.?|corp\.?|corporation|holdings?|plc|co\.|company|ltd\.?|incorporated|\(the\))$", "", (name or "").strip(), flags=re.I)
+    q = f'"{short}" OR {sym} stock when:2d' if short and short.upper() != sym else f"{sym} stock when:2d"
+    r = requests.get("https://news.google.com/rss/search", params={"q": q, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                     headers=UA, timeout=20)
+    r.raise_for_status()
+    out = []
+    for item in ET.fromstring(r.content).iter("item"):
+        title = (item.findtext("title") or "").strip()
+        if not title:
+            continue
+        src_el = item.find("source")
+        src = (src_el.text or "").strip() if src_el is not None else ""
+        if not src and " - " in title:
+            title, src = title.rsplit(" - ", 1)
+        when = ""
+        try:
+            when = parsedate_to_datetime(item.findtext("pubDate") or "").astimezone(timezone.utc).isoformat(timespec="seconds")
+        except Exception:  # noqa: BLE001
+            pass
+        out.append({"title": title, "src": src, "url": (item.findtext("link") or "").strip(), "at": when})
+    out.sort(key=lambda n: n["at"], reverse=True)
+    return out[:3]
+
+
+def news_for(tk, sym="", name=""):
     items = []
     raw = []
     try:
         raw = tk.get_news(count=6) if hasattr(tk, "get_news") else (tk.news or [])
     except Exception as e:  # noqa: BLE001
         if NEWS_ERR[0] < 3:
-            log(f"news failed for {getattr(tk, 'ticker', '?')}: {type(e).__name__}: {e}")
+            log(f"yahoo news failed for {sym}: {type(e).__name__}: {e}")
         NEWS_ERR[0] += 1
-    if not raw and NEWS_ERR[0] < 3:
-        log(f"no news items returned for {getattr(tk, 'ticker', '?')}")
-        NEWS_ERR[0] += 1
+    if not raw:
+        try:
+            return google_news(sym, name)
+        except Exception as e:  # noqa: BLE001
+            if NEWS_ERR[0] < 6:
+                log(f"google news failed for {sym}: {type(e).__name__}: {e}")
+            NEWS_ERR[0] += 1
+            return []
     for n in raw[:5]:
         c = n.get("content") if isinstance(n, dict) and isinstance(n.get("content"), dict) else n
         title = c.get("title")
@@ -254,7 +288,7 @@ def fundamentals(sym):
             pass
     if f["divYield"] is not None and f["divYield"] > 25:  # no index name yields that; treat as a unit mix-up
         f["divYield"] = None
-    return f, news_for(tk)
+    return f, news_for(tk, sym, f["name"])
 
 
 def score(f, price):
