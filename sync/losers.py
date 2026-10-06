@@ -92,20 +92,26 @@ def load_sp500():
 
 
 def load_nasdaq100():
-    r = requests.get("https://en.wikipedia.org/wiki/List_of_Nasdaq-100_companies", headers=UA, timeout=30)
+    r = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=UA, timeout=30)
     r.raise_for_status()
     tables = pd.read_html(io.StringIO(r.text))
     seen = []
     for t in tables:
         cols = [" ".join(str(x) for x in c).lower() if isinstance(c, tuple) else str(c).lower() for c in t.columns]
-        seen.append((len(t), cols[:4]))
+        seen.append((len(t), cols[:3]))
         for i, c in enumerate(cols):
             if "ticker" in c or "symbol" in c:
                 syms = [str(s).strip().upper() for s in t.iloc[:, i].tolist()]
                 syms = [s for s in syms if SYM_RX.fullmatch(s)]
                 if len(syms) > 80:
                     return syms
-    raise RuntimeError(f"no Nasdaq-100 table among {len(tables)}: {seen[:6]}")
+        # A table whose cells are mostly tickers but whose header was not recognised
+        for i in range(min(3, t.shape[1])):
+            vals = [str(s).strip().upper() for s in t.iloc[:, i].tolist()]
+            hits = [s for s in vals if SYM_RX.fullmatch(s)]
+            if len(hits) > 80 and len(hits) > 0.8 * len(vals):
+                return hits
+    raise RuntimeError(f"no Nasdaq-100 table among {len(tables)}: {seen}")
 
 
 def load_universe():
@@ -209,8 +215,10 @@ def google_news(sym, name):
             continue
         src_el = item.find("source")
         src = (src_el.text or "").strip() if src_el is not None else ""
-        if not src and " - " in title:
-            title, src = title.rsplit(" - ", 1)
+        if " - " in title:
+            head, tail = title.rsplit(" - ", 1)
+            if not src or tail.strip().lower() == src.lower() or len(tail) < 30:
+                title, src = head.strip(), (src or tail.strip())
         when = ""
         try:
             when = parsedate_to_datetime(item.findtext("pubDate") or "").astimezone(timezone.utc).isoformat(timespec="seconds")
@@ -257,14 +265,14 @@ def fundamentals(sym):
 
     tk = yf.Ticker(yahoo_symbol(sym))
     info = {}
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             info = tk.info or {}
             if info:
                 break
         except Exception as e:  # noqa: BLE001
             log(f"{sym} info attempt {attempt + 1}: {type(e).__name__}: {e}")
-            time.sleep(2)
+            time.sleep(8 * (attempt + 1))
     g = info.get
     f = {
         "name": g("shortName") or g("longName") or sym,
@@ -396,7 +404,7 @@ def main():
         sc, verdict, why = score(f, m["price"]) if f else (None, None, [])
         out.append({**m, "name": f.get("name") or m["sym"], "sector": f.get("sector"), "f": f, "news": news,
                     "score": sc, "verdict": verdict, "why": why})
-        time.sleep(0.4)
+        time.sleep(1.2)  # Yahoo rate-limits bursts of fundamentals requests
     write({
         "ok": True, "at": now, "bar": bar, "universe": {"size": len(symbols), "priced": len(today), "source": source},
         "market": {"spy": ctx.get("SPY", {}).get("pct"), "qqq": ctx.get("QQQ", {}).get("pct"),
