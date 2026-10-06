@@ -119,13 +119,14 @@ def load_universe():
     try:
         sp = load_sp500()
         nq = []
-        try:
-            nq = load_nasdaq100()
-        except Exception as e:  # noqa: BLE001
-            log(f"Nasdaq-100 list failed (continuing with extras): {type(e).__name__}: {e}")
+        if os.environ.get("LOSERS_NASDAQ100"):  # Wikipedia moved the components table; off until a stable source is found
+            try:
+                nq = load_nasdaq100()
+            except Exception as e:  # noqa: BLE001
+                log(f"Nasdaq-100 list failed (continuing with extras): {type(e).__name__}: {e}")
         syms = sorted(set(sp) | set(nq) | set(EXTRAS))
-        log(f"universe: {len(sp)} S&P 500 + {len(nq)} Nasdaq-100 + extras = {len(syms)}")
-        return syms, "github+wikipedia" if nq else "github"
+        log(f"universe: {len(sp)} S&P 500 + {len(nq)} Nasdaq-100 + {len(EXTRAS)} extras = {len(syms)}")
+        return syms, "sp500+extras" if not nq else "sp500+nasdaq100+extras"
     except Exception as e:  # noqa: BLE001
         log(f"S&P 500 list failed: {type(e).__name__}: {e}")
     try:
