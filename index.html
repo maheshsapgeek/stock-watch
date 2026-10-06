@@ -142,6 +142,18 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:64
 .range{height:6px;border-radius:3px;background:var(--panel-2);position:relative;margin:8px 0 2px}
 .range i{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--accent);transform:translateX(-50%)}
 .muted{color:var(--fg-3);font-size:12px}
+/* Losers card */
+.lmeta{padding:8px 14px 0;font-size:12px;color:var(--fg-2);display:flex;gap:10px;flex-wrap:wrap}
+.lfilter{display:flex;gap:6px;padding:10px 14px 4px;overflow-x:auto;scrollbar-width:none}
+.lfilter::-webkit-scrollbar{display:none}
+.lfilter button{flex:none;padding:5px 10px;border-radius:999px;background:var(--panel-2);color:var(--fg-2);font:500 12px/1 var(--font-cond);letter-spacing:.04em;text-transform:uppercase;border:1px solid transparent}
+.lfilter button[aria-pressed="true"]{background:var(--panel);border-color:var(--accent);color:var(--accent)}
+.lrow{grid-template-columns:1fr auto;row-gap:4px}
+.lrow .why{grid-column:1 / -1;font-size:12px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.verdict{display:inline-block;padding:2px 7px;border-radius:999px;font:500 11px/1.3 var(--font-cond);letter-spacing:.05em;text-transform:uppercase}
+.verdict.quality{background:var(--up-bg);color:var(--up)} .verdict.look{background:var(--warn-bg);color:var(--warn)} .verdict.reason{background:var(--down-bg);color:var(--down)} .verdict.none{background:var(--panel-2);color:var(--fg-3)}
+.score{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+.rules{margin:0;padding-left:18px;font-size:12px;color:var(--fg-2);display:flex;flex-direction:column;gap:4px}
 @media (prefers-reduced-motion: no-preference){
   .row{transition:background .15s}
   .row:active{background:var(--panel-2)}
@@ -188,6 +200,13 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 84px);max-width:64
     <div class="card">
       <div class="card-h"><h2>Watchlist</h2><button class="btn ghost sm" id="addWatchBtn">+ Add</button></div>
       <div class="rows" id="watchRows"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Biggest losers today</h2><div class="inline"><button class="btn ghost sm" id="shareLosersBtn">Copy for Claude</button><button class="btn ghost sm" id="refreshLosersBtn">Refresh</button></div></div>
+      <div class="lmeta" id="losersMeta"></div>
+      <div class="lfilter" id="losersFilter"><button data-f="all" aria-pressed="true">All</button><button data-f="quality">Quality on sale</button><button data-f="look">Worth a look</button><button data-f="reason">Falling for a reason</button></div>
+      <div class="rows" id="loserRows"></div>
+      <div class="note">Worst moves in the S&amp;P 500 and Nasdaq-100, refreshed hourly during US hours by the GitHub job. The score is a mechanical fundamentals check (tap a row for the rules); it tells you which falls are worth researching, not what to buy.</div>
     </div>
   </section>
 
@@ -582,8 +601,61 @@ function renderNews(){
   $("newsTag").textContent = NEWS.genAt ? "wire " + new Date(NEWS.genAt).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}) : "";
 }
 
+/* ---------- Biggest losers (data/losers.json, built by the GitHub job) ---------- */
+let LOSERS = null, losersAt = 0, losersFilter = "all";
+const VERDICT = { quality: "Quality on sale", look: "Worth a look", reason: "Falling for a reason" };
+const fmtBig = n => n == null ? "—" : n >= 1e12 ? "$" + (n/1e12).toFixed(2) + "T" : n >= 1e9 ? "$" + (n/1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n/1e6).toFixed(0) + "M" : "$" + Math.round(n);
+const fmtX = (n, d=1) => n == null ? "—" : (+n).toFixed(d);
+const fmtPc = n => n == null ? "—" : ((n>0?"+":"") + (n*100).toFixed(0) + "%");
+async function loadLosers(force){
+  if(!force && LOSERS && Date.now() - losersAt < 15*60000){ renderLosers(); return; }
+  try{ const r = await fetch("data/losers.json?t=" + Date.now(), { cache:"no-store" }); if(!r.ok) throw new Error(r.status); LOSERS = await r.json(); losersAt = Date.now(); }
+  catch(e){ LOSERS = LOSERS || { ok:false, reason: "no file yet (" + e.message + ")" }; }
+  renderLosers();
+}
+function renderLosers(){
+  const rows = $("loserRows"), meta = $("losersMeta"); rows.innerHTML = "";
+  if(!LOSERS || LOSERS.ok === false){ meta.textContent = ""; rows.innerHTML = `<div class="empty">${LOSERS && LOSERS.reason ? "The losers job hasn't published a list yet (" + esc(LOSERS.reason) + "). It runs hourly during US market hours." : "Loading…"}</div>`; return; }
+  const m = LOSERS.market || {}; const when = new Date(LOSERS.at);
+  meta.innerHTML = `<span>as of ${when.toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</span><span>session ${esc(LOSERS.bar||"")}</span>${m.spy!=null?`<span>S&amp;P <b class="num ${sign(m.spy)}">${fmtPct(m.spy)}</b></span>`:""}${m.qqq!=null?`<span>Nasdaq <b class="num ${sign(m.qqq)}">${fmtPct(m.qqq)}</b></span>`:""}${m.pctDown!=null?`<span>${m.pctDown}% of ${LOSERS.universe&&LOSERS.universe.priced||""} stocks down</span>`:""}`;
+  const list = (LOSERS.losers||[]).filter(l=> losersFilter==="all" || l.verdict===losersFilter);
+  if(!list.length){ rows.innerHTML = `<div class="empty">Nothing in this group today.</div>`; return; }
+  list.forEach(l=>{
+    const b = document.createElement("button"); b.className = "row lrow";
+    const held = S.holdings.find(h=>h.sym===l.sym && h.qty>0), watched = S.watch.find(w=>w.sym===l.sym);
+    b.innerHTML = `<div><div class="sym">${esc(l.sym)} <span class="muted">${esc(l.sector||"")}</span>${held?` <span class="pill flat">you hold</span>`:watched?` <span class="pill flat">watching</span>`:""}</div><div class="name">${esc(l.name||l.sym)}</div></div>
+      <div><div class="px num">${fmtUsd(l.price)}</div><div class="sub"><span class="pill ${sign(l.pct)}">${fmtPct(l.pct)}</span></div></div>
+      <div class="why"><span class="verdict ${l.verdict||"none"}">${l.verdict ? VERDICT[l.verdict] : "no data"}</span>${l.score!=null?` <span class="score">${l.score}/100</span>`:""}${l.why&&l.why.length?` · ${esc(l.why.slice(0,3).join(" · "))}`:""}</div>`;
+    b.onclick = ()=> openLoserSheet(l); rows.appendChild(b);
+  });
+}
+function openLoserSheet(l){
+  const f = l.f || {}; const host = $("sheetHost"); const up = f.target && l.price ? (f.target/l.price-1)*100 : null; const offHi = f.hi52 && l.price ? (l.price/f.hi52-1)*100 : null;
+  const kv = [
+    ["Price", `${fmtUsd(l.price)} <span class="pill ${sign(l.pct)}">${fmtPct(l.pct)}</span>`], ["Previous close", fmtUsd(l.prev)],
+    ["Market cap", fmtBig(f.mcap)], ["52-week range", f.lo52&&f.hi52 ? `${fmtUsd(f.lo52)} – ${fmtUsd(f.hi52)}` : "—"], ["From 52-week high", offHi!=null ? fmtPct(offHi) : "—"],
+    ["Revenue growth", fmtPc(f.revGrowth)], ["Operating margin", fmtPc(f.opMargin)], ["Net margin", fmtPc(f.netMargin)], ["Free cash flow", f.fcf!=null ? (f.fcf<0?"−":"") + fmtBig(Math.abs(f.fcf)) : "—"],
+    ["Cash / debt", f.cash!=null||f.debt!=null ? `${fmtBig(f.cash)} / ${fmtBig(f.debt)}` : "—"], ["P/E trailing / forward", `${fmtX(f.peTTM,0)} / ${fmtX(f.peFwd,0)}`], ["Price / sales", fmtX(f.ps)],
+    ["Dividend yield", f.divYield!=null ? fmtX(f.divYield,1) + "%" : "—"], ["Analysts", f.rec ? `${esc(String(f.rec).replace(/_/g," "))}${f.analysts?` (${f.analysts})`:""}` : "—"], ["Average target", f.target ? `${fmtUsd(f.target)}${up!=null?` <span class="pill ${sign(up)}">${fmtPct(up)}</span>`:""}` : "—"],
+    ["Next earnings", f.earningsAt ? esc(f.earningsAt) : "—"], ["Beta", fmtX(f.beta)]
+  ];
+  host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(l.sym)} <span class="muted">${esc(l.name||"")}${f.industry?" · "+esc(f.industry):""}</span></h3>
+    <div><span class="verdict ${l.verdict||"none"}">${l.verdict ? VERDICT[l.verdict] : "no data"}</span> ${l.score!=null?`<span class="score">${l.score}/100</span>`:""}</div>
+    ${l.why&&l.why.length?`<div class="muted" style="font-size:13px">${esc(l.why.join(" · "))}</div>`:""}
+    <div class="kv">${kv.map(([k,v])=>`<dt>${k}</dt><dd class="num">${v}</dd>`).join("")}</div>
+    <div class="label">Why it's down (latest headlines)</div><div class="news">${(l.news||[]).length ? l.news.map(n=>`<a href="${esc(n.url||"#")}" target="_blank" rel="noopener"><div>${esc(n.title)}</div><div class="src">${esc(n.src||"")}${n.at?" · "+new Date(n.at).toLocaleString("nl-NL",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):""}</div></a>`).join("") : `<span class="muted">No headline captured. Check the Yahoo link.</span>`}</div>
+    <div class="actions" style="padding:0"><button class="btn sm" id="lsWatch">${S.watch.find(w=>w.sym===l.sym)?"On watchlist":"Add to watchlist"}</button><a class="btn ghost sm" href="https://finance.yahoo.com/quote/${encodeURIComponent(l.sym)}" target="_blank" rel="noopener">Yahoo Finance</a><button class="btn ghost sm" id="lsClose">Close</button></div>
+    <details><summary class="label" style="cursor:pointer">How the score works</summary><ul class="rules">${(LOSERS.rules||[]).map(r=>`<li>${esc(r)}</li>`).join("")}</ul></details>
+    <div class="muted">A high score means the business looked healthy on its last filings, not that today's fall is over. Always read the headline first: a quality company falling on an earnings miss can keep falling for weeks.</div></div></div>`;
+  const close = ()=> host.innerHTML = ""; host.querySelector(".sheet").onclick = e=>{ if(e.target.classList.contains("sheet")) close(); }; $("lsClose").onclick = close;
+  $("lsWatch").onclick = ()=>{ if(!S.watch.find(w=>w.sym===l.sym)){ S.watch.push({ sym:l.sym, name:l.name||l.sym }); save(); render(); refreshQuotes(); toast(l.sym + " added to watchlist"); } close(); };
+}
+$("refreshLosersBtn").onclick = ()=> loadLosers(true);
+$("losersFilter").querySelectorAll("button").forEach(b=> b.onclick = ()=>{ losersFilter = b.dataset.f; $("losersFilter").querySelectorAll("button").forEach(x=> x.setAttribute("aria-pressed", x===b)); renderLosers(); });
+$("shareLosersBtn").onclick = ()=>{ if(!LOSERS || !LOSERS.losers){ toast("No list yet"); return; } const m = LOSERS.market||{}; const txt = `Biggest losers ${LOSERS.bar} (as of ${new Date(LOSERS.at).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"})} NL; S&P ${fmtPct(m.spy)}, Nasdaq ${fmtPct(m.qqq)}). Please analyse which of these are quality companies on a bad day and which are falling for a reason:\n` + LOSERS.losers.slice(0,15).map(l=>`- ${l.sym} ${fmtPct(l.pct)} at ${fmtUsd(l.price)} · ${l.verdict?VERDICT[l.verdict]:"no data"}${l.score!=null?" "+l.score+"/100":""}${l.why&&l.why.length?" · "+l.why.slice(0,3).join(", "):""}${l.news&&l.news[0]?" · news: "+l.news[0].title:""}`).join("\n"); if(navigator.share){ navigator.share({text:txt}).catch(()=>copyText(txt)); } else copyText(txt); };
+
 /* ---------- Views & events ---------- */
-function showView(v){ view = v; ["portfolio","watch","news","alerts","cal","settings"].forEach(k=>{ $("v-"+k).hidden = k!==v; }); document.querySelectorAll(".tabs button").forEach(b=> b.setAttribute("aria-selected", b.dataset.v===v)); try{ localStorage.setItem(LS+".view", v); }catch(e){} if(v==="cal") loadCal(false); if(v==="news") loadNews(false); window.scrollTo(0,0); }
+function showView(v){ view = v; ["portfolio","watch","news","alerts","cal","settings"].forEach(k=>{ $("v-"+k).hidden = k!==v; }); document.querySelectorAll(".tabs button").forEach(b=> b.setAttribute("aria-selected", b.dataset.v===v)); try{ localStorage.setItem(LS+".view", v); }catch(e){} if(v==="cal") loadCal(false); if(v==="news") loadNews(false); if(v==="watch") loadLosers(false); window.scrollTo(0,0); }
 document.querySelectorAll(".tabs button").forEach(b=> b.onclick = ()=> showView(b.dataset.v));
 $("saveKeyBtn").onclick = async ()=>{ S.finnhubKey = $("fkey").value.trim(); save(); $("fkey").value = ""; toast(S.finnhubKey ? "Key saved, loading prices" : "Key cleared"); await refreshQuotes(); schedule(); };
 $("savePassBtn").onclick = async ()=>{ S.passphrase = $("pass").value; save(); $("pass").value = ""; if(S.passphrase){ toast("Passphrase saved, syncing"); await syncT212(true); } else { toast("Passphrase cleared"); render(); } };
@@ -606,7 +678,7 @@ function promptSymbol(title, cb){ const host = $("sheetHost"); host.innerHTML = 
 function promptText(title, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>${esc(title)}</h3><div class="field" style="padding:0"><input id="pTxt" placeholder="paste here"></div><div class="actions" style="padding:0"><button class="btn sm" id="pOk">Restore</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ cb($("pTxt").value); close(); }; }
 function promptConfirm(msg, cb){ const host = $("sheetHost"); host.innerHTML = `<div class="sheet"><div class="panel"><div class="handle"></div><h3>Are you sure?</h3><p style="margin:0">${esc(msg)}</p><div class="actions" style="padding:0"><button class="btn danger sm" id="pOk">Yes, reset</button><button class="btn ghost sm" id="pCancel">Cancel</button></div></div></div>`; const close=()=>host.innerHTML=""; $("pCancel").onclick=close; $("pOk").onclick=()=>{ cb(); close(); }; }
 
-document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible"){ refreshQuotes(); schedule(); if(S.passphrase && (!S.t212 || !S.t212.at || Date.now() - Date.parse(S.t212.at) > 3600000)) syncT212(false); } else clearTimeout(timer); });
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible"){ refreshQuotes(); schedule(); if(S.passphrase && (!S.t212 || !S.t212.at || Date.now() - Date.parse(S.t212.at) > 3600000)) syncT212(false); if(view==="watch") loadLosers(false); } else clearTimeout(timer); });
 window.addEventListener("online", ()=>{ refreshQuotes(); schedule(); });
 
 /* ---------- Boot ---------- */

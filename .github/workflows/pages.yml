@@ -3,8 +3,10 @@ on:
   push:
     branches: [main]
   schedule:
-    # 08:00 and 23:00 Amsterdam (06:00 and 21:00 UTC) on weekdays: refresh positions from Trading 212
-    - cron: "0 6,21 * * 1-5"
+    # 08:00 Amsterdam on weekdays: refresh positions from Trading 212 before the daily brief
+    - cron: "0 6 * * 1-5"
+    # Hourly through the US session (13:30-21:30 UTC covers summer and winter time): losers list + positions
+    - cron: "30 13-21 * * 1-5"
   workflow_dispatch:
 permissions:
   contents: read
@@ -37,6 +39,12 @@ jobs:
         run: |
           pip install -q cryptography
           python sync/fetch_positions.py
+      - name: Build biggest-losers list (S&P 500 + Nasdaq-100, with fundamentals)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          pip install -q "yfinance>=0.2.60" pandas lxml requests
+          python sync/losers.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
